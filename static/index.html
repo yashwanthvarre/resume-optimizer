@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resume Optimizer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">R</span> Resume Optimizer</div>
+  <div class="topbar-right">
+    <button class="ghost" id="restartBtn" hidden>← New job</button>
+    <button class="ghost icon" id="settingsBtn" title="Settings">⚙</button>
+  </div>
+</header>
+
+<!-- ========================= STEP 1: inputs ========================= -->
+<main id="setupView" class="setup">
+  <section class="card">
+    <div class="step-head"><span class="step-no">1</span><h2>Job description</h2></div>
+    <label class="label" for="jdUrl">Job posting link</label>
+    <div class="row">
+      <input id="jdUrl" type="url" placeholder="https://company.wd1.myworkdayjobs.com/... or LinkedIn, Greenhouse, Lever…">
+      <button id="fetchBtn">Fetch</button>
+    </div>
+    <div class="hint"><a href="#" id="pasteLink">Or paste the job description text</a></div>
+    <div id="jdStatus" class="status"></div>
+    <div id="jdBox" hidden>
+      <div class="jd-meta"><strong id="jdTitle"></strong><span id="jdMethod" class="badge"></span></div>
+      <textarea id="jdText" rows="12" placeholder="Paste the full job description here…"></textarea>
+      <div class="hint">Check this is the right job. You can edit the text before analyzing.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="step-head"><span class="step-no">2</span><h2>Your resume</h2></div>
+    <label class="label" for="resumePath">Path to your resume on this computer (.docx, .pdf or .txt)</label>
+    <div class="row">
+      <input id="resumePath" type="text" spellcheck="false" placeholder="">
+      <button class="secondary" id="browseBtn" title="Open your system's file picker">Browse…</button>
+      <button id="loadBtn">Load</button>
+    </div>
+    <div class="hint">Any format works: <code>~/Documents/resume.docx</code>, <code>C:\Users\you\resume.docx</code>, a pasted “Copy as path”, or
+      <label class="linklike">upload a file<input type="file" id="uploadInput" accept=".docx,.pdf,.txt,.md" hidden></label>.</div>
+    <div id="resumeStatus" class="status"></div>
+  </section>
+
+  <div class="analyze-bar">
+    <button id="analyzeBtn" class="primary big" disabled>Analyze &amp; optimize</button>
+    <div id="analyzeStatus" class="status"></div>
+  </div>
+</main>
+
+<!-- ========================= STEP 2: review ========================= -->
+<main id="reviewView" class="review" hidden>
+  <section class="summary card">
+    <div class="summary-main">
+      <div>
+        <div class="eyebrow">Optimizing for</div>
+        <h2 id="rvRole"></h2>
+        <p id="rvAssessment" class="muted"></p>
+      </div>
+      <div class="score">
+        <div class="score-box"><div class="score-num" id="scoreBefore">0</div><div class="score-lbl">Before</div></div>
+        <div class="score-arrow">→</div>
+        <div class="score-box after"><div class="score-num" id="scoreAfter">0</div><div class="score-lbl">After</div></div>
+      </div>
+    </div>
+    <details class="kw" open>
+      <summary>Keyword coverage <span id="kwCount" class="muted"></span></summary>
+      <div id="kwChips" class="chips"></div>
+      <div class="legend"><span class="muted small">Legend:</span><span class="chip ok">in resume</span><span class="chip added">added by selected changes</span><span class="chip miss">missing</span></div>
+    </details>
+  </section>
+
+  <div class="toolbar">
+    <div><strong id="selCount"></strong></div>
+    <div class="toolbar-actions">
+      <button class="ghost" id="selAll">Select all</button>
+      <button class="ghost" id="selNone">Deselect all</button>
+      <label class="toggle"><input type="checkbox" id="hlToggle" checked> Highlight changes in preview</label>
+    </div>
+  </div>
+
+  <div class="panes">
+    <section class="changes">
+      <div id="changeList"></div>
+      <div id="suggestBox" class="card suggest" hidden>
+        <h3>Worth adding — only if true</h3>
+        <p class="muted small">These gaps can't be closed by rewording. They are <b>not</b> added to your resume automatically.</p>
+        <ul id="suggestList"></ul>
+      </div>
+    </section>
+    <section class="preview-wrap">
+      <div class="preview-head">Live preview <span class="muted small" id="fmtNote"></span></div>
+      <div id="preview" class="preview"></div>
+    </section>
+  </div>
+
+  <footer class="export card">
+    <div class="export-row">
+      <label class="label" for="outDir">Save to folder</label>
+      <div class="row">
+        <input id="outDir" type="text" spellcheck="false">
+        <button class="secondary" id="outBrowse">Browse…</button>
+        <button class="primary" id="exportBtn">Download updated resume (.docx)</button>
+      </div>
+      <div id="exportStatus" class="status"></div>
+    </div>
+  </footer>
+</main>
+
+<!-- ========================= settings ========================= -->
+<dialog id="settingsDlg">
+  <form method="dialog" class="dlg">
+    <h3>Settings</h3>
+    <div class="label">How the app talks to Claude</div>
+    <label class="radio"><input type="radio" name="engine" value="claude_code"> <span><b>My Claude subscription</b> (via Claude Code) — no API key, uses your plan</span></label>
+    <div class="hint" id="ccState"></div>
+    <label class="radio"><input type="radio" name="engine" value="api"> <span><b>Anthropic API key</b> — pay-as-you-go</span></label>
+    <div id="apiFields">
+      <label class="label" for="apiKey">API key</label>
+      <input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off">
+      <div class="hint" id="keyState"></div>
+      <label class="label" for="modelIn">API model</label>
+      <input id="modelIn" type="text" spellcheck="false">
+    </div>
+    <div id="ccFields">
+      <label class="label" for="ccModelIn">Claude Code model</label>
+      <input id="ccModelIn" type="text" spellcheck="false" placeholder="sonnet">
+      <div class="hint">An alias like <code>sonnet</code> or <code>opus</code>, or leave blank for Claude Code's default.</div>
+    </div>
+    <div class="hint">Settings are saved on this computer in <code>~/.resume-optimizer</code>.</div>
+    <div class="dlg-actions">
+      <button value="cancel" class="ghost">Cancel</button>
+      <button id="saveSettings" value="save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
