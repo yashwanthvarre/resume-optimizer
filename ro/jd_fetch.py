@@ -18,6 +18,8 @@ import requests
 import trafilatura
 from bs4 import BeautifulSoup
 
+from .jobs import check, emit
+
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
 HEADERS = {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9",
@@ -124,6 +126,7 @@ def _ats_api(url: str) -> dict | None:
 
     # Workday: https://{tenant}.wd5.myworkdayjobs.com/[en-US/]{site}/job/{location}/{slug}
     if "myworkdayjobs.com" in host and "job" in parts:
+        emit("fetch", "running", "Detected Workday — using its public job API")
         if re.fullmatch(r"[a-z]{2}-[A-Z]{2}", parts[0]):
             parts = parts[1:]
         tenant = host.split(".")[0]
@@ -138,6 +141,7 @@ def _ats_api(url: str) -> dict | None:
 
     # Greenhouse: boards.greenhouse.io/{board}/jobs/{id}  or  job-boards.greenhouse.io/{board}/jobs/{id}
     if "greenhouse.io" in host and "jobs" in parts:
+        emit("fetch", "running", "Detected Greenhouse — using its public job API")
         i = parts.index("jobs")
         if i >= 1 and i + 1 < len(parts):
             r = requests.get(f"https://boards-api.greenhouse.io/v1/boards/{parts[i-1]}/jobs/{parts[i+1]}",
@@ -150,6 +154,7 @@ def _ats_api(url: str) -> dict | None:
 
     # Lever: jobs.lever.co/{company}/{uuid}
     if host == "jobs.lever.co" and len(parts) >= 2:
+        emit("fetch", "running", "Detected Lever — using its public job API")
         r = requests.get(f"https://api.lever.co/v0/postings/{parts[0]}/{parts[1]}", headers=HEADERS, timeout=20)
         if r.ok:
             j = r.json()
@@ -187,46 +192,68 @@ def _render_with_browser(url: str) -> str:
             browser.close()
 
 
+def _found(res: dict) -> dict:
+    words = len(res["text"].split())
+    emit("fetch", "done", f"Read the posting via {res.get('method', 'direct fetch')}")
+    emit("extract", "done", f"Extracted {words:,} words"
+         + (f" — {res['title']}" if res.get("title") else "")
+         + (f" at {res['company']}" if res.get("company") else ""))
+    return res
+
+
 def fetch_jd(url: str) -> dict:
     url = (url or "").strip()
     if not re.match(r"^https?://", url, re.I):
         url = "https://" + url
     notes = []
+    emit("fetch", "running", f"Fetching {urlparse(url).netloc or url}")
 
     job_id = _linkedin_id(url)
     if job_id:
+        emit("fetch", "running", f"Detected LinkedIn job {job_id} — reading the public posting")
         try:
             res = _linkedin(job_id)
             if res:
-                return {**res, "method": "LinkedIn public posting", "url": url}
+                return _found({**res, "method": "LinkedIn public posting", "url": url})
             notes.append("LinkedIn guest page had no description")
         except requests.RequestException as e:
             notes.append(f"LinkedIn: {e}")
 
+    check()
     try:
         res = _ats_api(url)
         if res:
-            return {**res, "url": url}
+            return _found({**res, "url": url})
     except (requests.RequestException, ValueError) as e:
         notes.append(f"job-board API: {e.__class__.__name__}")
 
+    check()
+    emit("fetch", "running", "Downloading the page")
     try:
         r = requests.get(url, headers=HEADERS, timeout=25, allow_redirects=True)
         if r.status_code < 400:
+            emit("fetch", "done", f"Page downloaded ({len(r.text) // 1024:,} KB)")
+            emit("extract", "running", "Looking for job data (JSON-LD, then main content)")
             res = _extract(r.text, r.url)
             if res:
-                return {**res, "method": "Direct fetch", "url": url}
+                return _found({**res, "method": "Direct fetch", "url": url})
             notes.append("page loaded but no job text found (likely rendered by JavaScript)")
+            emit("extract", "pending", "No job text in the plain page")
         else:
             notes.append(f"site returned HTTP {r.status_code}")
     except requests.RequestException as e:
         notes.append(f"direct fetch failed: {e.__class__.__name__}")
 
+    check()
     if playwright_available():
+        emit("fetch", "running", "Rendering the page in a headless browser (can take ~20s)")
         try:
-            res = _extract(_render_with_browser(url), url)
+            page_html = _render_with_browser(url)
+            emit("fetch", "done", "Page rendered in the headless browser")
+            emit("extract", "running", "Looking for job data in the rendered page")
+            res = _extract(page_html, url)
             if res:
-                return {**res, "method": "Headless browser", "url": url}
+                return _found({**res, "method": "Headless browser", "url": url})
             notes.append("browser rendered the page but no job text was found (login wall?)")
         except Exception as e:  # browser missing, timeout, etc.
             msg = str(e).splitlines()[0][:160]

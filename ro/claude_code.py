@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 TIMEOUT = 420  # seconds; long resumes can take a couple of minutes
@@ -67,6 +68,28 @@ def _friendly(stderr: str, stdout: str) -> str:
     return "Claude Code failed: " + (last[-1][:300] if last else "no output")
 
 
+def _run_cancellable(cmd: list[str], prompt: str, cwd: str, env: dict) -> subprocess.CompletedProcess:
+    """subprocess.run, but the child is killed if the user cancels the job it belongs to."""
+    from . import jobs
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", cwd=cwd, env=env)
+    deadline, pending = time.monotonic() + TIMEOUT, prompt
+    while True:
+        try:
+            out, err = proc.communicate(input=pending, timeout=0.5)
+            return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+        except subprocess.TimeoutExpired:
+            pending = None  # stdin was already written on the first call
+            if jobs.cancelled():
+                proc.kill()
+                proc.communicate()
+                raise jobs.Cancelled()
+            if time.monotonic() > deadline:
+                proc.kill()
+                proc.communicate()
+                raise ClaudeCodeError("Claude Code took too long to respond. Please try again.")
+
+
 def run(system: str, user: str, schema: dict, model: str | None = None) -> dict:
     exe = find_claude()
     if not exe:
@@ -92,11 +115,7 @@ def run(system: str, user: str, schema: dict, model: str | None = None) -> dict:
             cmd = [exe, "-p", "--output-format", "json", *flags]
             if model:
                 cmd += ["--model", model]
-            try:
-                r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
-                                   timeout=TIMEOUT, cwd=cwd, env=env)
-            except subprocess.TimeoutExpired:
-                raise ClaudeCodeError("Claude Code took too long to respond. Please try again.")
+            r = _run_cancellable(cmd, prompt, cwd, env)
             err = (r.stderr or "").lower()
             if r.returncode != 0 and ("unknown option" in err or "unknown argument" in err):
                 last_err = r.stderr

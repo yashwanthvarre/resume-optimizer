@@ -63,6 +63,33 @@ def active_engine() -> str:
     return pref
 
 
+DOC_FONTS = ("EB Garamond", "keep")
+
+
+def get_doc_font() -> str:
+    """Font for downloaded resumes and letters: EB Garamond, or "keep" the resume's own font."""
+    f = load_config().get("doc_font", "EB Garamond")
+    return f if f in DOC_FONTS else "EB Garamond"
+
+
+FILE_FORMATS = ("pdf", "docx", "both")
+
+
+def get_file_format() -> str:
+    """What Download saves: a PDF (default), the .docx, or both."""
+    f = load_config().get("file_format", "pdf")
+    return f if f in FILE_FORMATS else "pdf"
+
+
+def get_name_override() -> str:
+    """The candidate's name for file names when the resume's own name line isn't detected well."""
+    return (load_config().get("name_override") or "").strip()
+
+
+def get_bold_keywords() -> bool:
+    return bool(load_config().get("bold_keywords", True))
+
+
 def get_cc_model() -> str:
     return load_config().get("cc_model", "sonnet")
 

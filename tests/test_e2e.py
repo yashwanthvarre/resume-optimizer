@@ -28,6 +28,7 @@ CH = {"overall_assessment": "Good fit.", "suggestions": [{"text": "Add Kubernete
 analyzer._call_tool = lambda s, u, tool, mt: JD if tool["name"] == "record_jd" else CH
 
 c = TestClient(appmod.app)
+c.post("/api/settings", json={"file_format": "docx"})  # these checks read the .docx; tests/test_pdf.py covers PDF
 src = (Path(__file__).parent / "sample_resume.docx").resolve()
 # path handling: quoted, ~-relative style
 r = c.post("/api/resume/load", json={"path": f'"{src}"'}); assert r.status_code == 200, r.text
@@ -37,6 +38,14 @@ r = c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}); asse
 res = r.json()
 ids = [x["target_id"] for x in res["changes"]]
 print("changes:", ids); assert ids == ["p3", "p5", "p6", "p7"]
+assert res["keyword_gaps"] == [], res["keyword_gaps"]  # this canned response has none
+assert res["notices"] == [], res["notices"]
+CH["notices"] = [{"text": "Portfolio link required."}, {"text": "  "}]
+assert c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()["notices"] == ["Portfolio link required."]
+del CH["notices"]
+CH["keyword_gaps"] = [{"term": "Kubernetes", "reason": "Not shown in your resume."}, {"term": "", "reason": "junk"}]
+gaps = c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()["keyword_gaps"]
+assert gaps == [{"term": "Kubernetes", "reason": "Not shown in your resume."}], gaps
 print("warnings:", {x["target_id"]: x["warnings"] for x in res["changes"] if x["warnings"]})
 # accept p5, p6, p7 (reject summary)
 acc = [{"target_id": x["target_id"], "new_text": x["new_text"]} for x in res["changes"] if x["target_id"] != "p3"]

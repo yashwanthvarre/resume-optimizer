@@ -10,3 +10,5 @@ anthropic>=0.40
 python-dotenv>=1.0
 # Optional: reads job sites that need JavaScript and have no public API.
 # Install with:  pip install playwright && python -m playwright install chromium
+# PDF output uses LibreOffice (free, https://www.libreoffice.org/download/) when it's installed.
+# Without it, on macOS/Windows with Microsoft Word:  pip install docx2pdf
