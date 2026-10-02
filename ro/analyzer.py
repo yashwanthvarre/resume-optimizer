@@ -147,7 +147,7 @@ COVER_RULES = """Rules — follow all of them:
 
 KEYWORDS_TOOL = {
     "name": "record_keyword_decisions",
-    "description": "Record, for each keyword, whether the candidate's note supports adding it, and the edits that add them.",
+    "description": "Record, for each keyword, where you added it and what backs it up, and the edits that add them.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -157,13 +157,14 @@ KEYWORDS_TOOL = {
                     "type": "object",
                     "properties": {
                         "term": {"type": "string", "description": "The keyword exactly as given"},
-                        "decision": {"type": "string", "enum": ["add", "decline"]},
-                        "explanation": {"type": "string", "description": "1 sentence to the candidate: where you added it, "
-                                                                         "or why the note isn't enough yet"},
-                        "follow_up_question": {"type": "string", "description": "When declining: ONE specific question "
-                                                                                "whose answer would let you add it"},
+                        "evidence": {"type": "string", "enum": ["strong", "weak"],
+                                     "description": "strong: a resume line or the note clearly shows this work; "
+                                                    "weak: only related work, so the candidate should double-check it"},
+                        "explanation": {"type": "string", "description": "1 sentence to the candidate: where you added it"},
+                        "based_on": {"type": "string", "description": "The resume line (or the candidate's note) that "
+                                                                      "backs it up, quoted briefly"},
                     },
-                    "required": ["term", "decision", "explanation"],
+                    "required": ["term", "evidence", "explanation"],
                 },
             },
             "changes": {
@@ -177,29 +178,59 @@ KEYWORDS_TOOL = {
 }
 
 KEYWORD_RULES = """Rules — follow all of them:
-1. Keywords with a <candidate_note>: decide each on its OWN note. Decide "add" ONLY if that note genuinely
-   shows hands-on experience with the keyword. A bare claim ("I know it", "used it a bit") or something
-   unrelated is NOT enough: decide "decline" and ask ONE specific follow-up question (what they built with
-   it, where, their role).
-1b. Keywords marked <draft_from_resume>: the candidate asked you to write it in from their resume alone.
-   Decide "add" ONLY if the resume already shows work that the keyword truthfully describes (e.g. "built UI
-   components in JSX" -> React; a Python REST service -> REST APIs), and name that resume line in the
-   explanation. NEVER invent a project, employer, tool usage or result to fit the keyword. If nothing in the
-   resume supports it, decide "decline", explain that, and set follow_up_question to invite a note
-   (e.g. "Where have you used React?").
-2. Plan the edits for all added keywords TOGETHER. Edit each paragraph AT MOST ONCE: if several keywords
-   belong in the same paragraph (e.g. the Skills line), put them all in that one edit. Keep bullets readable —
-   don't stuff several keywords into one bullet when separate bullets fit better.
-3. Use at most 2 paragraphs per added keyword, and at most (1 + number of added keywords) paragraphs overall.
-   Each change edits ONE existing paragraph (target_id), new_text is its COMPLETE new text, and jd_keywords
-   lists every keyword that change adds.
-4. Resume text below already includes the candidate's approved edits. Build on that text exactly — keep
+0. The candidate is not available for questions: never ask them anything. Place every keyword you can place
+   naturally; a keyword that would only read as stuffing is better left out than forced in.
+1. Keywords marked <add_keyword>: the candidate wants it added without being asked anything.
+   a. FIRST, research these keywords with web search: what each covers in practice, i.e. the tools, tasks
+      and outcomes job postings and engineers group under it. Group related keywords into one query (e.g.
+      "observability Prometheus Grafana skills backend engineer"); use up to 5 searches in total. Then
+      compare what you learned with the resume.
+   b. Find the resume line whose work is closest to it. Count adjacent, truthful evidence: a Flask or
+      Express service is REST API work; Docker images deployed to AWS are containerized deployments;
+      dashboards and alerts on service metrics are observability. Name that line in based_on.
+   c. PREFER BULLETS AND THE SUMMARY. Rewrite that line so the keyword sits inside the sentence as part of
+      what the candidate did, never tacked on at the end: "Deployed services to AWS through CI/CD
+      pipelines", not "Deployed services to AWS. CI/CD pipelines." and not "..., using CI/CD pipelines".
+      Set evidence "strong" when the line clearly shows the work, "weak" when it only shows related work
+      (e.g. Kubernetes when it shows Docker deployments), so the candidate double-checks it.
+   d. Related keywords go into ONE natural phrase, not a list: "set up observability with Prometheus and
+      Grafana dashboards", not "observability, Prometheus, Grafana".
+   e. ATS software matches keywords literally, so the keyword's own words must appear (singular or plural
+      is fine, a different word form is not): "scalable" does not count for "Scalability", write "designed
+      for scalability"; "microservices" does not count for "Microservices architecture", write "moved the
+      orders service to a microservices architecture". Natural sentence, exact words.
+   f. Web results only explain what a keyword MEANS. They are never evidence of the candidate's experience:
+      never take a project, tool, employer, metric or result from them.
+2. Keywords with a <candidate_note>: the note is the candidate's own account, often only a few words
+   ("used it for the billing dashboard at Acme"). Treat it as true and work with what it gives: turn it into
+   a polished line in the right role (the role attribute, if given; otherwise the best fit). Set evidence
+   "strong". Even a thin note is enough: use what it says and keep the claim modest.
+3. Plan the edits for all keywords TOGETHER and spread them out. Edit each paragraph AT MOST ONCE. Add at
+   most 2 keywords to any one bullet or summary sentence (a phrase like "observability with Prometheus and
+   Grafana" counts as one); if more belong in the same role, use different bullets.
+3b. The Skills line is a LAST RESORT, only for a concrete tool or technology (PostgreSQL, Terraform, Kafka)
+   that no bullet can honestly carry. Add at most 3 new items to it in total, and insert each one next to
+   the items it relates to (PostgreSQL right after SQL, Kubernetes right after Docker), never as a pile at
+   the end. Never put soft skills (communication, attention to detail) or phrases of more than two words
+   ("microservices architecture", "end-to-end ownership") on the Skills line: those go into a bullet or
+   are left out.
+4. Use at most 2 paragraphs per keyword, and at most (1 + number of keywords) paragraphs overall.
+   Each change edits ONE existing paragraph (target_id), new_text is its COMPLETE new text, jd_keywords
+   lists every keyword that change adds, and reason names the resume line or note it is based on.
+5. Resume text below already includes the candidate's approved edits. Build on that text exactly — keep
    everything already there and only weave the keywords (and the facts from the notes) in.
-5. Use only facts from the resume or the notes. Never inflate: no numbers, team sizes, scope, seniority or
-   outcomes that a note doesn't state. Mirror the JD's exact spelling of each keyword.
-6. Preserve structure: leading bullet symbols, tab characters (\\t), and "Company | Title | Dates" header
+6. Use only facts from the resume or the notes. Never inflate: no numbers, team sizes, scope, seniority or
+   outcomes that the resume or a note doesn't state. Mirror the JD's exact spelling of each keyword. Write
+   in the candidate's voice, matching the tense and style of the surrounding bullets.
+7. Preserve structure: leading bullet symbols, tab characters (\\t), and "Company | Title | Dates" header
    lines. Don't edit names, contact details, dates, employers, titles, schools or headings.
-7. Keep bullets concise (≤ ~1.3x their current length)."""
+8. Keep bullets concise (≤ ~1.3x their current length) and natural. No awkward rewrites like "Backend
+   engineering professional" or "mentoring peers with attention to detail": if a keyword can't be said
+   the way a person would say it, leave it out. Don't echo a word the line already uses ("Backend engineer
+   with 4 years of backend engineering experience" -> "Engineer with 4 years of backend engineering
+   experience") and don't wedge a keyword in as an aside ("built services with Flask, applying REST API
+   design, that processed orders" -> "designed the REST APIs for Flask services that processed orders";
+   a keyword can change form inside the sentence only if its exact words stay together)."""
 
 SYSTEM = """You are an expert technical recruiter and resume writer who optimizes resumes for \
 Applicant Tracking Systems (ATS) and human reviewers. You are scrupulously honest."""
@@ -239,33 +270,73 @@ def _client():
     return anthropic.Anthropic()
 
 
+# calls that may look things up on the web: only the keyword step, to learn what a keyword usually covers
+WEB_TOOLS = {"record_keyword_decisions"}
+WEB_MAX_USES = 5
+_DYNAMIC_SEARCH = re.compile(r"claude-(opus-(5|4-[678])|sonnet-(5|4-6))\b")
+
+
 def _call_tool(system: str, user: str, tool: dict, max_tokens: int) -> dict:
+    web = tool["name"] in WEB_TOOLS
     if config.active_engine() == "claude_code":
         from . import claude_code
         try:
-            return claude_code.run(system, user, tool["input_schema"], config.get_cc_model() or None)
+            return claude_code.run(system, user, tool["input_schema"], config.get_cc_model() or None,
+                                   tools=("WebSearch",) if web else ())
         except claude_code.ClaudeCodeError as e:
             raise AIError(str(e))
+    if web:
+        return _call_api_with_search(system, user, tool, max_tokens)
     return _call_api(system, user, tool, max_tokens)
 
 
-def _call_api(system: str, user: str, tool: dict, max_tokens: int) -> dict:
+def _api_errors(fn):
     import anthropic
     try:
-        msg = _client().messages.create(
-            model=config.get_model(), max_tokens=max_tokens, system=system,
-            tools=[tool], tool_choice={"type": "tool", "name": tool["name"]},
-            messages=[{"role": "user", "content": user}],
-        )
+        return fn()
     except anthropic.AuthenticationError:
         raise AIError("The Anthropic API key was rejected. Check it in Settings (⚙).")
     except anthropic.NotFoundError as e:
         raise AIError(f"Model '{config.get_model()}' not available to your key. Change it in Settings. ({e})")
     except anthropic.APIError as e:
         raise AIError(f"AI request failed: {e}")
+
+
+def _call_api(system: str, user: str, tool: dict, max_tokens: int) -> dict:
+    msg = _api_errors(lambda: _client().messages.create(
+        model=config.get_model(), max_tokens=max_tokens, system=system,
+        tools=[tool], tool_choice={"type": "tool", "name": tool["name"]},
+        messages=[{"role": "user", "content": user}],
+    ))
     for block in msg.content:
         if block.type == "tool_use":
             return block.input
+    raise AIError("The AI returned no structured result. Please try again.")
+
+
+def _call_api_with_search(system: str, user: str, tool: dict, max_tokens: int) -> dict:
+    """Web search, then the record tool. A forced tool_choice would skip the search, so this uses "auto",
+    resumes paused turns, and nudges once if Claude stops without recording its answer."""
+    model = config.get_model()
+    search = {"type": "web_search_20260209" if _DYNAMIC_SEARCH.search(model) else "web_search_20250305",
+              "name": "web_search", "max_uses": WEB_MAX_USES}
+    messages = [{"role": "user", "content": user + f"\n\nFinish by calling {tool['name']} exactly once."}]
+    nudged = False
+    for _ in range(6):
+        msg = _api_errors(lambda: _client().messages.create(
+            model=model, max_tokens=max(max_tokens, 16000), system=system,
+            tools=[search, tool], tool_choice={"type": "auto"}, messages=messages,
+        ))
+        for block in msg.content:
+            if block.type == "tool_use" and block.name == tool["name"]:
+                return block.input
+        messages.append({"role": "assistant", "content": msg.content})
+        if msg.stop_reason == "pause_turn":
+            continue  # the server resumes its search loop from the trailing server_tool_use block
+        if nudged or msg.stop_reason not in ("end_turn", "tool_use"):
+            break
+        messages.append({"role": "user", "content": f"Now call {tool['name']} with your result."})
+        nudged = True
     raise AIError("The AI returned no structured result. Please try again.")
 
 
@@ -317,24 +388,24 @@ def write_cover_letter(jd: dict, resume_text: str, hiring_manager: str = "", ton
 
 
 def decide_keywords(jd: dict, paragraphs: list[dict], edits: dict[str, str], items: list[dict]) -> dict:
-    """items: [{term, mode: "note"|"resume", justification, role}] — one request for all of them."""
+    """items: [{term, mode: "add"|"note", justification, role}] — one request for all of them."""
     by_term = {k.get("term", "").lower(): k for k in jd.get("keywords", [])}
     blocks = []
     for it in items:
         kw = by_term.get(it["term"].lower(), {"term": it["term"]})
         role = f' role="{it["role"]}"' if it.get("role", "").strip() else ""
-        if it.get("mode") == "resume":
-            blocks.append(f"Keyword: {json.dumps(kw, ensure_ascii=False)}\n"
-                          f'<draft_from_resume term="{it["term"]}"{role} /> (no note: use only what the resume shows)')
-        else:
+        if it.get("mode") == "note":
             blocks.append(f"Keyword: {json.dumps(kw, ensure_ascii=False)}\n"
                           f'<candidate_note term="{it["term"]}"{role}>\n{it["justification"].strip()[:2000]}\n</candidate_note>')
+        else:
+            blocks.append(f"Keyword: {json.dumps(kw, ensure_ascii=False)}\n"
+                          f'<add_keyword term="{it["term"]}"{role} /> (no note: research it, then use what the resume shows)')
     user = (
         f"Job: {jd.get('role', '')} at {jd.get('company', '')}. {jd.get('summary', '')}\n\n"
         "Resume paragraphs (id, section/kind, JSON-quoted current text):\n" + "\n".join(_para_lines(paragraphs, edits)) +
         f"\n\nThe candidate wants these {len(items)} keywords from the job description added. For some they wrote a "
-        "note in their own words; for others they asked you to write it in from their resume:\n\n" + "\n\n".join(blocks) + "\n\n" + KEYWORD_RULES +
-        "\n\nDecide each keyword, then write the edits for the ones you add."
+        "short note in their own words; the rest you add on your own:\n\n" + "\n\n".join(blocks) + "\n\n" + KEYWORD_RULES +
+        "\n\nWrite the edits that work these keywords in naturally."
     )
     return _call_tool(SYSTEM, user, KEYWORDS_TOOL, 6000)
 

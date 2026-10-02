@@ -318,8 +318,9 @@ dialog.sheet:not([open]) { display: none; }
 .gap-hint.low { color: var(--butter); }
 .gap-include, .gap-see { justify-self: start; }
 .gap-empty { padding: 20px 0; text-align: center; }
-.reply { background: var(--butter-bg); border-radius: var(--r-sm); padding: 9px 12px; font-size: 13px; }
-.reply-q { margin-top: 4px; font-weight: 600; color: var(--butter); }
+.gap-row.missed .gap-reason { color: var(--butter); }
+.gap-row.skipped .gap-head b, .gap-row.skipped .gap-reason { opacity: .55; }
+#gapsSkipAll { margin-right: auto; }
 .advice { margin-top: 12px; padding-top: 4px; border-top: 1px solid var(--line); font-size: 13px; }
 .advice ul { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
 

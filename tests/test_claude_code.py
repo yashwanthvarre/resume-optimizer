@@ -23,6 +23,13 @@ for name, (script, want) in cases.items():
     with mock.patch.object(claude_code, "find_claude", lambda s=script: fake(s)):
         got = claude_code.run("sys", "user", SCHEMA)
         assert got == want, (name, got); print("ok:", name)
+# tools are off by default; a call can opt into named built-in tools, which are then pre-approved
+TOOLS = ('i = args.index("--tools")\nprint(json.dumps({"is_error":False,"structured_output":'
+         '{"tools": args[i + 1], "allowed": args[args.index("--allowedTools") + 1] if "--allowedTools" in args else None}}))')
+with mock.patch.object(claude_code, "find_claude", lambda: fake(TOOLS)):
+    assert claude_code.run("s", "u", SCHEMA) == {"tools": "", "allowed": None}
+    assert claude_code.run("s", "u", SCHEMA, tools=("WebSearch",)) == {"tools": "WebSearch", "allowed": "WebSearch"}
+    print("ok: tools off by default, WebSearch on request")
 with mock.patch.object(claude_code, "find_claude", lambda: fake('print(json.dumps({"is_error":True,"result":"Invalid API key · Please run /login"}))')):
     try: claude_code.run("s", "u", SCHEMA); raise SystemExit("expected error")
     except claude_code.ClaudeCodeError as e: assert "signed in" in str(e); print("ok: login message ->", e)

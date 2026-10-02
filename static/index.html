@@ -105,7 +105,7 @@
       <button type="button" class="kw-line" id="kwSummaryBtn" aria-controls="kwDlg" title="See all keywords">
         <span id="kwLine">0 of 0 keywords</span><span class="kw-delta" id="kcDelta"></span><span class="kw-miss" id="kwMissing"></span>
       </button>
-      <button class="secondary sm" id="gapsOpen" hidden>Fill gaps</button>
+      <button class="secondary sm" id="gapsOpen" hidden>Add keywords</button>
     </div>
     <div class="bar-view">
       <div class="seg" id="filterSeg" role="group" aria-label="Show edits">
@@ -228,7 +228,7 @@
     <h4>Not added <span class="muted" id="kwOutCount"></span></h4>
     <div id="kwOut" class="chips"></div>
     <p class="muted small">★ required. Hover or tap a keyword to see why it wasn't added.</p>
-    <button class="primary" id="kwGaps">Fill gaps →</button>
+    <button class="primary" id="kwGaps">Add missing keywords →</button>
     <div class="sr-only" id="kcLive" aria-live="polite"></div>
   </div>
 </dialog>
@@ -240,8 +240,8 @@
 <dialog id="gapsDlg" class="sheet side wide" aria-labelledby="gapsTitle">
   <div class="sheet-head">
     <div>
-      <h3 id="gapsTitle">Fill the keyword gaps</h3>
-      <p class="muted small">Mark the ones you really have. Claude adds them in one go, only where your note or resume supports it.</p>
+      <h3 id="gapsTitle">Add missing keywords</h3>
+      <p class="muted small"><b>Add it</b>: Claude looks up what each keyword covers, finds the closest work in your resume and works it into that line. No questions. <b>Describe it</b>: give Claude a quick idea instead. <b>Skip</b>: leave out keywords that don't fit you.</p>
     </div>
     <button type="button" class="ghost icon" id="gapsClose" aria-label="Close">✕</button>
   </div>
@@ -253,8 +253,9 @@
   <div class="sheet-foot">
     <div id="gapsStatus" class="status"></div>
     <div class="dlg-actions">
+      <button type="button" class="linklike" id="gapsSkipAll" hidden>Skip all</button>
       <button type="button" class="ghost" id="gapsCancel">Close</button>
-      <button type="button" class="primary" id="gapsSubmit" disabled>Pick an option for a keyword</button>
+      <button type="button" class="primary" id="gapsSubmit" disabled>Add all missing keywords</button>
     </div>
   </div>
 </dialog>

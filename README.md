@@ -102,22 +102,23 @@ The last path you used, your output folder, API key and model are stored per use
 ## Honesty guardrails
 
 - Claude is instructed to never invent employers, titles, dates, tools, skills or metrics. It only rewords what your resume already supports.
-- A skill that your resume doesn't show appears under **Not added** in the Keywords panel and in **Fill gaps**, with the reason. It is never inserted automatically; other advice from Claude is listed at the bottom of Fill gaps.
+- A skill that your resume doesn't show appears under **Not added** in the Keywords panel and in **Add missing keywords**, with the reason. It is only written in when you ask (see below); other advice from Claude is listed at the bottom of that panel.
 - A change is flagged ⚠ if it introduces a number that doesn't appear anywhere in your resume, or if it makes a line noticeably longer.
 - Keyword coverage is shown as plain counts: how many keywords the job lists, how many your resume had, and how many it has **now** with the edits you've accepted. Click the keyword line above the page to open the **Keywords** panel. A keyword counts if its exact term, a listed variant or a simple plural appears in the text.
 - Keywords are split into **In your resume** (a **new** tag marks the ones your accepted edits added) and **Not added**. Hover over or tap a "Not added" keyword to see why it's missing:
   - A suggested edit adds it but you skipped that edit. The tooltip offers to include it.
   - Claude's reason for that keyword, for example that your resume doesn't show that experience.
-- **Fill the keyword gaps:** click **Fill gaps (N)** above the page. The same panel also opens from the Keywords panel or a missing keyword's tooltip. Every missing keyword is listed with the reason it's missing, and each one has three options:
-  - **Skip** (the default).
-  - **Describe it:** a few words on where and how you used it (at least 3 words), and optionally the role.
-  - **Write it from my resume:** no typing. Claude looks for work your resume already shows that the keyword truthfully describes (e.g. JSX components → React), writes it in, and names the line it's based on. It never invents a project or tool to fit. If nothing supports it, the row switches to **Describe it** and shows Claude's question.
+- **Add missing keywords:** click **Add N keywords** above the page. The same panel also opens from the Keywords panel or a missing keyword's tooltip. Every missing keyword is listed with the reason it's missing, and each one has two options:
+  - **Add it** (the default, no typing): Claude searches the web for what the keyword covers in practice (the tools, tasks and outcomes postings group under it), finds work your resume already shows that it truthfully describes (e.g. Flask endpoints → REST APIs, dashboards and alerts → observability), and rephrases that line so the keyword reads naturally. Web results only explain what a keyword means; they are never used as evidence of your experience, so it never invents a project, tool or number to fit. It never asks you anything. Keywords go into the sentences of your bullets and summary (at most two per line, using the keyword's exact words so ATS software matches them), not piled onto the end. When your resume only shows related work, the edit is flagged for you to double-check. The Skills line is a last resort for concrete tools only: at most 3 new items per round, each placed next to a related one (PostgreSQL after SQL), and never soft skills or phrases like "microservices architecture". A keyword that can't be worked in naturally is left out and says why.
+  - **Describe it:** a quick idea in a few words (e.g. "used it for the billing dashboard at Acme"), and optionally the role. Claude treats your note as true and turns it into a polished line.
+  - **Skip:** for keywords that don't fit you. Skipped keywords are never sent to Claude and stay skipped for this job until you pick another option. **Skip all** / **Unskip all** sits next to the Add button.
 
-  One keyword is enough to send, and whatever mix you choose goes to Claude in a **single request**:
+  **Add all N missing keywords** sends every row to Claude in a **single request**, shown as one job in the Activity pill. The panel then says what happened (e.g. "Added 7 · 2 need a quick note"), and only the keywords that need a note stay open.
   - Edits are planned together: each paragraph is edited at most once, with at most 2 paragraphs per keyword, building on your current text.
-  - Edits based on your note arrive **accepted**, with a **From your input** tag. Edits Claude drafted from your resume arrive **skipped**, with a **Drafted by Claude** tag and a "confirm it's accurate" warning, and they only count once you accept them.
-  - A note that's too vague keeps your text and shows Claude's follow-up question. **Ask again** resends only the rows you've changed. If a newer edit to the same line replaces a draft you haven't accepted, that keyword becomes a gap again, ready to redraft.
-  - Numbers from your own notes aren't flagged as invented, but any other new number is. An edit that removes a job keyword a line already had is flagged too. Only your own notes (not Claude's drafts) are passed to the cover letter as evidence.
+  - New edits arrive **accepted**, tagged **Added by Claude** or **From your input**, with a reason naming the resume line or note they're based on. You can skip any of them on the page like any other edit; a keyword whose edit you skip becomes a gap again.
+  - Sending again resends only the rows you've changed.
+  - Numbers from your own notes aren't flagged as invented, but any other new number is. An edit that removes a job keyword a line already had is flagged too. Only your own notes (not Claude's additions) are passed to the cover letter as evidence.
+  - Web search is used for this step only, through Claude Code's WebSearch tool or the API's web search tool (at most 5 searches per request). Every other step runs with no tools.
 
 ## Files
 
@@ -134,7 +135,7 @@ static/             UI (HTML/CSS/JS, no build step)
 tests/              offline tests; tests/mock_server.py runs the UI with canned AI output
 ```
 
-Run the tests with `python tests/test_e2e.py && python tests/test_jobs_cover.py && python tests/test_justify.py && python tests/test_parse_layout.py && python tests/test_typography.py && python tests/test_pdf.py && python tests/test_file_names.py && python tests/test_jd_fetch.py && python tests/test_fuzz_docx_edit.py && python tests/test_claude_code.py`. `python tests/test_autofetch_ui.py` checks auto-fetch in a real browser against the mock server; it needs Playwright and skips without it. With `tests/mock_server.py`, links on a `.test` host (e.g. `https://jobs.example.test/1`) return a canned posting.
+Run the tests with `python tests/test_e2e.py && python tests/test_jobs_cover.py && python tests/test_justify.py && python tests/test_parse_layout.py && python tests/test_typography.py && python tests/test_pdf.py && python tests/test_file_names.py && python tests/test_jd_fetch.py && python tests/test_fuzz_docx_edit.py && python tests/test_claude_code.py && python tests/test_web_search.py`. `python tests/test_autofetch_ui.py` checks auto-fetch in a real browser against the mock server; it needs Playwright and skips without it. With `tests/mock_server.py`, links on a `.test` host (e.g. `https://jobs.example.test/1`) return a canned posting.
 
 `python tests/mock_server.py` runs the UI with canned AI output. Set `MOCK_DELAY=3` to slow the fake AI calls down so the progress UI is easier to watch.
 

@@ -26,70 +26,78 @@ accepted = [{"target_id": x["target_id"], "new_text": x["new_text"]} for x in re
 p7_edit = next(a["new_text"] for a in accepted if a["target_id"] == "p7")
 K8S = "At Acme I ran our staging and production services on Kubernetes across 3 clusters with Helm charts."
 PG = "Our orders database at Acme was PostgreSQL; I wrote the schema migrations and tuned slow queries."
-VAGUE = "I know Docker Swarm pretty well."
-item = lambda t, n, r="": {"term": t, "justification": n, "role": r}
+VAGUE = "yes"
+item = lambda t, n, r="": {"term": t, "mode": "note", "justification": n, "role": r}
 
 # ---- input validation (no AI call)
 n0 = len(calls)
 assert c.post("/api/justify_keywords", json={"session_id": sid, "items": []}).status_code == 400
-r = c.post("/api/justify_keywords", json={"session_id": sid, "items": [item("Kubernetes", K8S), item("PostgreSQL", "yes")]})
-assert r.status_code == 400 and "PostgreSQL" in r.json()["detail"], r.text      # under 3 words
-r = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": "Kubernetes", "mode": "guess"}]})
-assert r.status_code == 400, r.text
+r = c.post("/api/justify_keywords", json={"session_id": sid, "items": [item("Kubernetes", K8S), item("PostgreSQL", "  ")]})
+assert r.status_code == 400 and "PostgreSQL" in r.json()["detail"], r.text      # empty note
+for old in ("resume", "skip", "guess"):                                           # the old modes are gone
+    r = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": "Kubernetes", "mode": old}]})
+    assert r.status_code == 400, (old, r.text)
 sid2 = c.post("/api/resume/load", json={"path": str(src)}).json()["session_id"]
 assert c.post("/api/justify_keywords", json={"session_id": sid2, "items": [item("Kubernetes", K8S)]}).status_code == 400
 assert len(calls) == n0, "validation must not call Claude"
 print("ok: input validation")
 
-# ---- a single keyword with a short (3-word) note is enough; resume mode needs no text at all
+# ---- a short note is enough (no word minimum); "add" is the default mode and needs no text at all
 d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [item("Kubernetes", "Ran Kubernetes clusters")]})
-assert d.status_code == 200 and d.json()["decisions"][0]["decision"] == "decline", d.text  # short note -> Claude asks for more
-d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": "PostgreSQL", "mode": "resume"}]})
-assert d.status_code == 200, d.text
-print("ok: one keyword / short note / no-text resume mode accepted")
+assert d.status_code == 200 and d.json()["decisions"][0]["added"], d.text
+d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": "PostgreSQL"}]})
+assert d.status_code == 200 and d.json()["decisions"][0]["added"], d.text
+assert '<add_keyword term="PostgreSQL"' in prompts["record_keyword_decisions"]
+print("ok: one keyword / short note / default add mode")
 
-# ---- mixed add / decline in ONE request, skills merged into one edit
+# ---- several notes in ONE request (even a one-word note is used), skills merged into one edit
 n0 = len(calls)
 d = c.post("/api/justify_keywords", json={"session_id": sid, "accepted": accepted, "items": [
     item("Kubernetes", K8S, "Acme Corp · Software Engineer"), item("PostgreSQL", PG), item("Docker Swarm", VAGUE)]}).json()
 assert calls[n0:] == ["record_keyword_decisions"], calls[n0:]          # exactly one Claude call
 dec = {x["term"]: x for x in d["decisions"]}
 assert [x["term"] for x in d["decisions"]] == ["Kubernetes", "PostgreSQL", "Docker Swarm"]
-assert dec["Kubernetes"]["decision"] == dec["PostgreSQL"]["decision"] == "add"
-assert dec["Docker Swarm"]["decision"] == "decline" and dec["Docker Swarm"]["follow_up_question"].endswith("?")
+assert all(x["added"] for x in d["decisions"]) and not any("follow_up_question" in x for x in d["decisions"])
 by_p = {x["target_id"]: x for x in d["changes"]}
 assert set(by_p) == {"p7", "p10"}, by_p.keys()
-assert by_p["p10"]["jd_keywords"] == ["Kubernetes", "PostgreSQL"] and by_p["p10"]["from_input"] == "Kubernetes, PostgreSQL"
+assert by_p["p10"]["jd_keywords"] == ["Kubernetes", "PostgreSQL", "Docker Swarm"]
+assert by_p["p10"]["from_input"] == "Kubernetes, PostgreSQL, Docker Swarm"
 assert by_p["p7"]["jd_keywords"] == ["Kubernetes"]
 u = prompts["record_keyword_decisions"]
 assert p7_edit in u and K8S in u and PG in u and 'role="Acme Corp · Software Engineer"' in u
 assert "AT MOST ONCE" in u
-print("ok: mixed batch ->", {t: x["decision"] for t, x in dec.items()})
+print("ok: notes batch ->", {t: x["added"] for t, x in dec.items()})
 
-# ---- mixed modes in ONE request: a note-based add, a resume-drafted add, a resume-mode decline
+# ---- mixed modes in ONE request: a note, an "Add it" Claude places, an "Add it" Claude misses (-> Skills line)
 n0 = len(calls)
 d = c.post("/api/justify_keywords", json={"session_id": sid, "accepted": accepted, "items": [
-    item("Kubernetes", K8S), {"term": "PostgreSQL", "mode": "resume"}, {"term": "Terraform", "mode": "resume", "justification": "ignored"}]}).json()
+    item("Kubernetes", K8S), {"term": "PostgreSQL", "mode": "add"}, {"term": "Terraform", "mode": "add", "justification": "ignored"}]}).json()
 assert calls[n0:] == ["record_keyword_decisions"]
 u = prompts["record_keyword_decisions"]
-assert '<draft_from_resume term="PostgreSQL"' in u and '<draft_from_resume term="Terraform"' in u and "ignored" not in u
+assert '<add_keyword term="PostgreSQL"' in u and '<add_keyword term="Terraform"' in u and "ignored" not in u
+assert "web search" in u and "never evidence" in u                     # research rules reach Claude
+assert "not available for questions" in u and "LAST RESORT" in u and "at most 3 new items" in u
 dec = {x["term"]: x for x in d["decisions"]}
-assert dec["Kubernetes"]["decision"] == "add" and dec["PostgreSQL"]["decision"] == "add"
-assert dec["Terraform"]["decision"] == "decline" and dec["Terraform"]["follow_up_question"] == "Where have you used Terraform?"
+assert all(x["added"] for x in d["decisions"]) and not any("follow_up_question" in x for x in d["decisions"])
+assert dec["PostgreSQL"]["based_on"] == "SQL" and dec["PostgreSQL"]["evidence"] == "strong"
+assert dec["Terraform"]["evidence"] == "weak" and "Skills" in dec["Terraform"]["explanation"]
 by_p = {x["target_id"]: x for x in d["changes"]}
-assert by_p["p10"]["source"] == "resume" and any("confirm it's accurate" in w and "PostgreSQL" in w for w in by_p["p10"]["warnings"])
-assert by_p["p7"]["source"] == "note" and not any("confirm" in w for w in by_p["p7"]["warnings"])
-print("ok: mixed modes ->", {t: x["decision"] for t, x in dec.items()}, {k: v["source"] for k, v in by_p.items()})
+assert by_p["p10"]["source"] == "add" and by_p["p7"]["source"] == "note"
+# Claude's two items stay where it put them; the fallback puts Terraform next to AWS, not at the end
+assert by_p["p10"]["new_text"] == "Python, Flask, SQL, AWS, Terraform, Git, Docker, Kubernetes, PostgreSQL", by_p["p10"]["new_text"]
+assert "Terraform" in by_p["p10"]["jd_keywords"]
+assert any("related work for Terraform" in w for w in by_p["p10"]["warnings"]), by_p["p10"]["warnings"]
+print("ok: mixed modes ->", {t: x["evidence"] for t, x in dec.items()}, {k: v["source"] for k, v in by_p.items()})
 
-# resume-mode items are not stored as the candidate's evidence
+# "Add it" items are not stored as the candidate's evidence
 sess = appmod.SESSIONS[sid]
 assert all(j.get("mode", "note") == "note" and j["justification"] for j in sess["justifications"])
 
 # ---- guardrails
 OVERRIDE.append({"decisions": [
-    {"term": "Kubernetes", "decision": "add", "explanation": "x"},
-    {"term": "PostgreSQL", "decision": "add", "explanation": "x"},       # no change will carry it -> downgraded
-    {"term": "Terraform", "decision": "add", "explanation": "not asked"},  # ignored
+    {"term": "Kubernetes", "evidence": "strong", "explanation": "x"},
+    {"term": "PostgreSQL", "evidence": "strong", "explanation": "x"},     # no kept change carries it -> Skills line
+    {"term": "Terraform", "evidence": "strong", "explanation": "not asked"},  # ignored
 ], "changes": [
     {"target_id": "p10", "new_text": "Python, Flask, SQL, AWS, Git, Docker, Kubernetes", "type": "keyword", "reason": "r"},
     {"target_id": "p10", "new_text": "Python, Flask, SQL, AWS, Git, Docker, Kubernetes, PostgreSQL", "type": "keyword", "reason": "r"},  # same paragraph twice
@@ -100,17 +108,18 @@ OVERRIDE.append({"decisions": [
 d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [item("Kubernetes", K8S), item("PostgreSQL", PG)]}).json()
 dec = {x["term"]: x for x in d["decisions"]}
 assert set(dec) == {"Kubernetes", "PostgreSQL"}, dec.keys()           # Terraform ignored
-assert dec["PostgreSQL"]["decision"] == "decline" and dec["PostgreSQL"]["follow_up_question"]
+assert dec["PostgreSQL"]["added"] and dec["PostgreSQL"]["evidence"] == "weak"
 ids = {x["target_id"]: x for x in d["changes"]}
 assert set(ids) == {"p6", "p10"}, ids.keys()                         # overall limit 1+2=3 ok; p8 = 3rd Kubernetes edit
-assert "Kubernetes" in ids["p10"]["new_text"] and "PostgreSQL" not in ids["p10"]["new_text"]
+assert ids["p10"]["new_text"] == "Python, Flask, SQL, PostgreSQL, AWS, Git, Docker, Kubernetes", ids["p10"]["new_text"]
+assert ids["p10"]["jd_keywords"] == ["Kubernetes", "PostgreSQL"]
 assert any("40" in w for w in ids["p6"]["warnings"])                  # 40 isn't in resume or notes
 txt = " ".join(d["dropped"])
 assert "same paragraph twice" in txt and "doesn't exist" in txt and "2-paragraph limit" in txt, d["dropped"]
 print("ok: guardrails", d["dropped"])
 
 # overall paragraph limit: 1 keyword -> at most 2 paragraphs
-OVERRIDE.append({"decisions": [{"term": "Kubernetes", "decision": "add", "explanation": "x"}], "changes": [
+OVERRIDE.append({"decisions": [{"term": "Kubernetes", "evidence": "strong", "explanation": "x"}], "changes": [
     {"target_id": "p10", "new_text": "Python, Flask, SQL, AWS, Git, Docker, Kubernetes", "type": "keyword", "reason": "r"},
     {"target_id": "p6", "new_text": "Built services in Python and Flask on Kubernetes.", "type": "keyword", "reason": "r"},
     {"target_id": "p8", "new_text": "Helped teammates with Kubernetes code reviews.", "type": "keyword", "reason": "r"},
@@ -120,18 +129,63 @@ assert len(d["changes"]) == 2 and any("limit of edits" in x for x in d["dropped"
 print("ok: overall limit")
 
 # an edit that silently drops a JD keyword the line already had is flagged
-OVERRIDE.append({"decisions": [{"term": "Kubernetes", "decision": "add", "explanation": "x"}], "changes": [
+OVERRIDE.append({"decisions": [{"term": "Kubernetes", "evidence": "strong", "explanation": "x"}], "changes": [
     {"target_id": "p10", "new_text": "Python, Flask, SQL, AWS, Git, Kubernetes", "type": "keyword", "reason": "r"}]})  # Docker gone
 d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [item("Kubernetes", K8S)]}).json()
 assert any("Drops Docker" in w for w in d["changes"][0]["warnings"]), d["changes"][0]["warnings"]
 print("ok: dropped-keyword warning")
 
-# ---- resubmitting only the declined one
+# ---- Claude returns nothing at all: every keyword still lands on the Skills line
+OVERRIDE.append({"decisions": [], "changes": []})
+d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": "Terraform"}, {"term": "Go"}]}).json()
+assert [x["added"] for x in d["decisions"]] == [True, True], d
+assert [x["new_text"] for x in d["changes"]] == ["Python, Go, Flask, SQL, AWS, Terraform, Git, Docker"]
+# ---- the Skills line takes at most 3 new items, most important first; never soft skills or long phrases
+OVERRIDE.append({"decisions": [], "changes": []})
+d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": t} for t in
+    ("Terraform", "Kafka", "Redis", "PostgreSQL", "Kubernetes", "attention to detail", "microservices architecture")]}).json()
+dec = {x["term"]: x for x in d["decisions"]}
+assert len(d["changes"]) == 1 and len(d["changes"][0]["new_text"].split(", ")) == 6 + 3, d["changes"]
+# PostgreSQL is "preferred" in the JD so it goes first; then the rest in the order given
+assert [t for t, x in dec.items() if x["added"]] == ["Terraform", "Kafka", "PostgreSQL"], dec
+assert d["changes"][0]["new_text"] == "Python, Flask, SQL, PostgreSQL, AWS, Terraform, Git, Docker, Kafka", d["changes"]
+assert not dec["attention to detail"]["added"] and not dec["microservices architecture"]["added"]
+assert "naturally" in dec["microservices architecture"]["explanation"], dec["microservices architecture"]
+assert not any("follow_up_question" in x for x in d["decisions"])
+# Claude's own Skills edit is held to the same rules
+OVERRIDE.append({"decisions": [], "changes": [{"target_id": "p10", "type": "keyword", "reason": "r",
+    "new_text": "Python, Flask, SQL, PostgreSQL, AWS, Git, Docker, Kubernetes, Terraform, Kafka, attention to detail, microservices architecture"}]})
+d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": t} for t in
+    ("PostgreSQL", "Kubernetes", "Terraform", "Kafka", "attention to detail", "microservices architecture")]}).json()
+assert d["changes"][0]["new_text"] == "Python, Flask, SQL, PostgreSQL, AWS, Git, Docker, Kubernetes, Terraform", d["changes"]
+assert [x["term"] for x in d["decisions"] if x["added"]] == ["PostgreSQL", "Kubernetes", "Terraform"]
+# related placement inside a labelled list
+assert appmod._insert_related(["Languages: Python", "SQL", "Docker"], "PostgreSQL") == ["Languages: Python", "SQL", "PostgreSQL", "Docker"]
+assert appmod._insert_related(["Languages: Python", "SQL"], "Kubernetes") == ["Languages: Python", "SQL", "Kubernetes"]
+assert appmod._insert_related(["Python", "Git", "Docker"], "CI/CD pipelines") == ["Python", "Git", "CI/CD pipelines", "Docker"]
+print("ok: Skills-line cap, related placement, no soft skills / long phrases")
+
+# ---- Skip: skipped keywords are never sent to Claude or added
+OVERRIDE.append({"decisions": [], "changes": []})
+d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": "Terraform"}, {"term": "Kafka", "mode": "skip"}]}).json()
+assert "term=\"Kafka\"" not in prompts["record_keyword_decisions"] and '<add_keyword term="Terraform"' in prompts["record_keyword_decisions"]
+assert [x["term"] for x in d["decisions"]] == ["Terraform"] and all("Kafka" not in x["new_text"] for x in d["changes"])
+n0 = len(calls)
+r = c.post("/api/justify_keywords", json={"session_id": sid, "items": [{"term": "Kafka", "mode": "skip"}]})
+assert r.status_code == 400 and len(calls) == n0, r.text                    # all skipped: nothing to do
+print("ok: skip")
+
+# no skills list anywhere: nothing to fall back on, so the keyword is reported as not placed (still no question)
+paras = [{"id": "p1", "section": "Experience", "kind": "bullet", "text": "Built things."}]
+assert appmod._skills_fallback(paras, {}, [], ["Go"], "x") == ([], [])
+print("ok: Skills-line fallback")
+
+# ---- one more note on its own
 d = c.post("/api/justify_keywords", json={"session_id": sid, "items": [
     item("Docker Swarm", "I set up a Docker Swarm cluster at Acme to run our internal tools and on-call dashboards.")]}).json()
-assert [x["decision"] for x in d["decisions"]] == ["add"] and d["changes"]
+assert [x["added"] for x in d["decisions"]] == [True] and d["changes"]
 assert prompts["record_keyword_decisions"].count("<candidate_note term=") == 1
-print("ok: resubmit only declined")
+print("ok: single note")
 
 # ---- notes reach the cover letter
 c.post("/api/cover_letter", json={"session_id": sid, "accepted": accepted})

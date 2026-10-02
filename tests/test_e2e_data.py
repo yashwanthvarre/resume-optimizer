@@ -37,37 +37,30 @@ COVER = {"greeting": "Dear Hiring Team,",
 
 
 
-# resume-mode mock: a keyword is "supported" if this related word appears in the resume
+# add-mode mock: a keyword is "supported" if this related word appears in the resume
 FAMILY = {"PostgreSQL": "SQL", "microservices": "services", "CI/CD": "deployments", "React": "JSX"}
 
 
 def keyword_decisions(user_prompt):
-    """Canned record_keyword_decisions.
-    Notes: adds a keyword whose note has ≥ 8 words, declines the rest.
-    Draft-from-resume: adds it if FAMILY[term] appears in the resume, else declines with a follow-up.
+    """Canned record_keyword_decisions. Claude never declines or asks anything now.
+    Notes: always added (even a thin note), evidence "strong".
+    Add it: added with evidence "strong" if FAMILY[term] appears in the resume; otherwise this mock "misses" it
+    (no decision, no edit), so the server's Skills-line fallback has to place it.
     All added skills go into the Skills line in ONE edit; the first noted one also goes into the AWS bullet."""
     import re, json
     notes = re.findall(r'<candidate_note term="([^"]+)"[^>]*>\n(.*?)\n</candidate_note>', user_prompt, re.S)
-    drafts = re.findall(r'<draft_from_resume term="([^"]+)"', user_prompt)
+    drafts = re.findall(r'<add_keyword term="([^"]+)"', user_prompt)
     resume = user_prompt.split("Resume paragraphs", 1)[-1].split("The candidate wants", 1)[0]
     decisions, add, noted_add = [], [], []
     for term, note in notes:
-        if len(note.split()) >= 8:
-            add.append(term); noted_add.append(term)
-            decisions.append({"term": term, "decision": "add", "explanation": f"Added {term} to your Skills line."})
-        else:
-            decisions.append({"term": term, "decision": "decline",
-                              "explanation": f"The note says you know {term}, but not what you did with it.",
-                              "follow_up_question": f"What did you build or run with {term}, and where?"})
+        add.append(term); noted_add.append(term)
+        decisions.append({"term": term, "evidence": "strong", "explanation": f"Added {term} to your Skills line."})
     for term in drafts:
         fam = FAMILY.get(term)
         if fam and fam in resume:
             add.append(term)
-            decisions.append({"term": term, "decision": "add", "explanation": f"Your resume mentions {fam}, so I added {term} to your Skills line."})
-        else:
-            decisions.append({"term": term, "decision": "decline",
-                              "explanation": f"Nothing in your resume shows {term} work, so I didn't write it in.",
-                              "follow_up_question": f"Where have you used {term}?"})
+            decisions.append({"term": term, "evidence": "strong", "based_on": fam,
+                              "explanation": f"Your resume mentions {fam}, so I added {term} to your Skills line."})
     cur = dict(re.findall(r'^\[(p\d+)\] \([^)]*\) (".*")$', user_prompt, re.M))
     cur = {k: json.loads(v) for k, v in cur.items()}
     changes = []
