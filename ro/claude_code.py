@@ -90,7 +90,8 @@ def _run_cancellable(cmd: list[str], prompt: str, cwd: str, env: dict) -> subpro
                 raise ClaudeCodeError("Claude Code took too long to respond. Please try again.")
 
 
-def run(system: str, user: str, schema: dict, model: str | None = None) -> dict:
+def run(system: str, user: str, schema: dict, model: str | None = None, tools: tuple[str, ...] = ()) -> dict:
+    """tools: built-in Claude Code tools this call may use (e.g. ("WebSearch",)); none by default."""
     exe = find_claude()
     if not exe:
         raise ClaudeCodeError("Claude Code isn't installed on this computer. Install it "
@@ -102,11 +103,13 @@ def run(system: str, user: str, schema: dict, model: str | None = None) -> dict:
     json_instr = ("\n\nRespond with ONLY a single JSON object (no prose, no code fences) that "
                   "matches this JSON Schema:\n" + schema_str)
 
+    allowed = ",".join(tools)
+    tool_flags = ["--tools", allowed] + (["--allowedTools", allowed] if allowed else [])
     # Newest CLI first; fall back to fewer flags for older Claude Code versions.
     attempts = [
-        (["--no-session-persistence", "--system-prompt", system, "--json-schema", schema_str, "--tools", ""],
+        (["--no-session-persistence", "--system-prompt", system, "--json-schema", schema_str, *tool_flags],
          user + json_instr),
-        (["--no-session-persistence", "--system-prompt", system, "--tools", ""], user + json_instr),
+        (["--no-session-persistence", "--system-prompt", system, *tool_flags], user + json_instr),
         ([], system + "\n\n" + user + json_instr),
     ]
     last_err = ""

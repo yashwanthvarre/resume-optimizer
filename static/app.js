@@ -374,8 +374,9 @@ $("analyzeBtn").onclick = async () => {
 };
 
 // ------------------------------------------------------------------ keywords
-function kwRegex(term) {
-  const t = term.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s-]+");
+function kwRegex(term) {  // simple plurals either way, like resume_io.kw_regex
+  term = term.trim(); if (/(?:[a-z]{3}[^s\W]|[A-Z]{2})s$/.test(term)) term = term.slice(0, -1);
+  const t = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s-]+");
   return new RegExp(`(^|[^A-Za-z0-9])${t}(?:s|es)?(?=$|[^A-Za-z0-9])`, "i");
 }
 const RANK = { required: 0, preferred: 1, nice: 2 };
@@ -577,7 +578,7 @@ function renderPop() {
   if (!c) return closePop();
   const on = state.selected.has(c.id), cur = state.edits[c.id] ?? c.new_text, edited = c.id in state.edits;
   const list = visibleEdits(), at = list.findIndex((x) => x.id === c.id);
-  const badge = c.source === "resume" ? `<span class="tag lilac" title="Claude wrote ${esc(c.from_input)} in from your resume — accept it only if it's accurate">Drafted by Claude</span>`
+  const badge = c.source === "add" ? `<span class="tag lilac" title="Claude added ${esc(c.from_input)} from work your resume already shows. Skip it if it isn't accurate">Added by Claude</span>`
     : c.from_input ? `<span class="tag sky" title="Added from what you told Claude about ${esc(c.from_input)}">From your input</span>` : "";
   const type = TYPE_LABEL[c.type] || c.type, sec = c.section.toLowerCase() === String(type).toLowerCase() ? c.section : `${c.section} · ${type}`;
   pop.innerHTML = `
@@ -700,10 +701,11 @@ $("kwIn").addEventListener("click", (e) => {
 });
 
 // ------------------------------------------------------------------ fill the gaps: every "Not added" keyword, one request
-// state.gaps[term] = { choice: "skip"|"note"|"resume", note, role, status: "draft"|"added"|"drafted"|"declined", sent, reply, changeId }
-//   added   = from the user's note, accepted    drafted = Claude wrote it from the resume, waiting for the user to accept
+// state.gaps[term] = { choice: "add"|"note"|"skip", note, role, status: "draft"|"added"|"missed", reply, changeId }
+//   add  = Claude researches the keyword and writes it in from the resume    note = the user's quick idea
+//   skip = not for this job: never sent, stays skipped until the user picks another option (until a new job)
+//   added = an edit carrying it is on the page    missed = no line could take it (rare: no Skills line either)
 let gapsJob = null;
-const MIN_WORDS = 3, GOOD_WORDS = 8;
 const CONTACT = /[\w.+-]+@[\w-]+\.\w|linkedin|github/i;
 // roles = dated employer lines ("Acme Corp  Jan 2022 – Present"), plus the job title on the next line
 function roleOptions() {
@@ -718,36 +720,21 @@ function roleOptions() {
   });
   return [...new Set(out)];
 }
-function gap(term) { return state.gaps[term] ??= { choice: "skip", note: "", role: "", status: "draft" }; }
+function gap(term) { return state.gaps[term] ??= { choice: "add", note: "", role: "", status: "draft" }; }
 function inResumeNow(term) { const k = kwForTerm(term); return !!k && k.res.some((r) => r.test(fullText(true))); }
 function gapStatus(term) {
   const g = gap(term), nowIn = inResumeNow(term);
   if (g.status === "added") return nowIn ? "added" : "draft";      // its edit was skipped later: a gap again
-  if (g.status === "drafted") {
-    if (nowIn) return "added";                                     // accepting the draft makes it added
-    // a later edit to the same line replaced the draft: it's an open gap again
-    return state.analysis.changes.some((c) => c.id === g.changeId) ? "drafted" : "draft";
-  }
   return g.status;
 }
+// only open gaps: once a keyword is in the resume its row goes away (the summary line says what was added)
 function gapTerms() {
-  return [...state.kws.map((k) => k.term).filter((t) => !inResumeNow(t) || ["added", "drafted"].includes(state.gaps[t]?.status)),
-    ...[...state.gapExtra].filter((t) => !kwForTerm(t))];
-}
-// what would be sent for this row ("" = nothing); used to resend only rows that changed
-function gapInput(term) {
-  const g = gap(term);
-  return g.choice === "note" ? `note|${g.note.trim()}` : g.choice === "resume" ? "resume" : "";
+  return [...state.kws.map((k) => k.term).filter((t) => !inResumeNow(t)),
+    ...[...state.gapExtra].filter((t) => !kwForTerm(t) && gapStatus(t) !== "added")];
 }
 function gapReady(term) {
   const g = gap(term), st = gapStatus(term);
-  if (st === "added" || st === "drafted") return false;
-  if (g.choice === "note" ? wordCount(g.note) < MIN_WORDS : g.choice !== "resume") return false;
-  return !(st === "declined" && gapInput(term) === g.sent);
-}
-function gapHint(note) {
-  const n = wordCount(note);
-  return !n ? "" : n < GOOD_WORDS ? "Say what you built or ran with it, and where." : "";
+  return st !== "added" && g.choice !== "skip" && !(g.choice === "note" && !g.note.trim());
 }
 function changeAdds(c, k) { return k.res.some((r) => r.test(state.edits[c.id] ?? c.new_text)); }
 function gapReason(k) {
@@ -755,44 +742,29 @@ function gapReason(k) {
   if (skipped) return { text: "A suggested edit adds this, but you skipped it.", change: skipped.id };
   const g = (state.analysis.keyword_gaps || []).find((x) => x.term.trim().toLowerCase() === k.term.trim().toLowerCase());
   if (g) return { text: g.reason };
-  return { text: "Your resume doesn't show experience with this, so it wasn't added. Add it yourself only if it's true." };
+  return { text: "Your resume doesn't mention this yet." };
 }
 
 function gapRowHtml(term, i, roles) {
   const k = kwForTerm(term), g = gap(term), st = gapStatus(term);
   const imp = k ? k.importance || "" : "suggested";
   const head = `<div class="gap-head"><b>${esc(term)}</b>${imp === "required" ? '<span class="req-star" title="Required">★</span>' : ""}
-    <span class="gap-imp">${esc(imp)}</span>${st === "added" ? '<span class="tag sage">Added</span>'
-    : st === "drafted" ? '<span class="tag lilac">Drafted — review it</span>'
-    : st === "declined" ? '<span class="tag butter">Needs more detail</span>' : ""}</div>`;
-  if (st === "added")
-    return `<div class="gap-row added" data-term="${esc(term)}">${head}
-      <div class="small">${esc(g.reply?.explanation || "Added to your resume.")}</div>
-      ${g.changeId ? `<button type="button" class="linklike gap-see" data-see="${esc(g.changeId)}">See it on the page</button>` : ""}</div>`;
-  if (st === "drafted")
-    return `<div class="gap-row drafted" data-term="${esc(term)}">${head}
-      <div class="small">${esc(g.reply?.explanation || "Claude drafted this from your resume.")} It isn't included until you accept it.</div>
-      ${g.changeId ? `<button type="button" class="linklike gap-see" data-see="${esc(g.changeId)}">Review it on the page</button>` : ""}</div>`;
-  const reason = g.status === "drafted" && st === "draft"
-    ? { text: "A newer edit to the same line replaced Claude's draft for this. Ask again to redraft it." }
-    : k ? gapReason(k) : { text: "Claude suggested this as worth adding — only if it's true." };
+    <span class="gap-imp">${esc(imp)}</span>${g.choice === "skip" ? '<span class="tag">Skipped</span>' : ""}</div>`;
+  const reason = k ? gapReason(k) : { text: "Claude suggested this as worth adding." };
   if (reason.change)
     return `<div class="gap-row" data-term="${esc(term)}">${head}<div class="gap-reason small muted">${esc(reason.text)}</div>
       <button type="button" class="secondary sm gap-include" data-change="${esc(reason.change)}">Accept that edit</button></div>`;
   const opt = (c, label) => `<button type="button" role="radio" data-c="${c}" class="${g.choice === c ? "active" : ""}" aria-checked="${g.choice === c}">${label}</button>`;
-  return `<div class="gap-row ${st}" data-term="${esc(term)}">${head}
-    <div class="gap-reason small muted">${esc(reason.text)}</div>
+  const why = g.choice === "skip" ? "Won't be added to your resume." : st === "missed" && g.reply ? g.reply.explanation : reason.text;
+  return `<div class="gap-row ${st}${g.choice === "skip" ? " skipped" : ""}" data-term="${esc(term)}">${head}
+    <div class="gap-reason small muted">${esc(why)}</div>
     <div class="seg gap-choice" role="radiogroup" aria-label="How should Claude handle ${esc(term)}?">
-      ${opt("skip", "Skip")}${opt("note", "Describe it")}${opt("resume", "Write it from my resume")}
+      ${opt("add", "Add it")}${opt("note", "Describe it")}${opt("skip", "Skip")}
     </div>
-    <div class="gap-explain small muted"${g.choice === "resume" ? "" : " hidden"}>Claude will look for related work in your resume and write ${esc(term)} in, or tell you it can't find any.</div>
     <div class="gap-form"${g.choice === "note" ? "" : " hidden"}>
-      ${st === "declined" && g.reply ? `<div class="reply"><b>Claude needs a bit more:</b> ${esc(g.reply.explanation)}${
-        g.reply.follow_up_question ? `<div class="reply-q">${esc(g.reply.follow_up_question)}</div>` : ""}</div>` : ""}
-      <label class="label" for="gapNote${i}">Where and how did you use it?</label>
-      <textarea id="gapNote${i}" rows="2" data-note placeholder="e.g. At Acme I used ${esc(term)} to … (what you built or ran, and your part in it)">${esc(g.note)}</textarea>
-      <div class="gap-hint small">${esc(gapHint(g.note))}</div>
-      <select data-role aria-label="Which role was this in? (optional)"><option value="">Not tied to a role</option>${
+      <label class="label" for="gapNote${i}">Your idea, in a few words</label>
+      <textarea id="gapNote${i}" rows="2" data-note placeholder="e.g. used it for the billing dashboard at Acme">${esc(g.note)}</textarea>
+      <select data-role aria-label="Which role was this in? (optional)"><option value="">Claude picks the role</option>${
         roles.map((r) => `<option${r === g.role ? " selected" : ""}>${esc(r)}</option>`).join("")}</select>
     </div></div>`;
 }
@@ -810,7 +782,7 @@ function renderAdvice() {
 function renderGaps() {
   const terms = gapTerms(), roles = roleOptions();
   $("gapsList").innerHTML = terms.length ? terms.map((t, i) => gapRowHtml(t, i, roles)).join("")
-    : '<div class="muted gap-empty">Every keyword from the job is in your resume.</div>';
+    : `<div class="muted gap-empty">${state.gapsSummary ? "Nothing left to add." : "Every keyword from the job is in your resume."}</div>`;
   $("gapsList").querySelectorAll("textarea").forEach(autosize);
   $("gapsSummary").hidden = !state.gapsSummary; $("gapsSummary").textContent = state.gapsSummary || "";
   renderAdvice();
@@ -818,18 +790,20 @@ function renderGaps() {
 }
 function refreshGapsFooter() {
   const ready = gapTerms().filter(gapReady), n = ready.length, running = gapsJob && gapsJob.status === "running";
-  const again = ready.some((t) => gapStatus(t) === "declined");
+  const open = gapTerms().filter((t) => gap(t).choice !== "skip"), all = n === open.length;
   $("gapsSubmit").disabled = !n || running;
-  if (!running) $("gapsSubmit").textContent = !n ? "Pick an option for a keyword"
-    : `${again ? "Ask again about" : "Ask Claude about"} ${n} keyword${n === 1 ? "" : "s"}`;
+  const allSkipped = gapTerms().length > 0 && !open.length;
+  $("gapsSkipAll").hidden = !gapTerms().length; $("gapsSkipAll").disabled = running;
+  $("gapsSkipAll").textContent = allSkipped ? "Unskip all" : "Skip all";
+  if (!running) $("gapsSubmit").textContent = !n ? (open.length ? "Write a quick note to continue" : "Nothing to add")
+    : n === 1 ? "Add 1 keyword" : `Add ${all ? "all " : ""}${n} ${all ? "missing " : ""}keywords`;
   $("gapsCancel").textContent = running ? "Stop" : "Close";
 }
-// terms: nothing (all gaps), one keyword (pre-selects "Describe it"), or several (highlights them)
+// terms: nothing (all gaps), or one or more keywords to highlight
 function openGaps(terms) {
   hideTip(); closePop(); closeKw();
   terms = [].concat(terms || []).filter(Boolean);
   terms.forEach((t) => { if (!kwForTerm(t)) state.gapExtra.add(t); });
-  if (terms.length === 1 && !["added", "drafted"].includes(gapStatus(terms[0])) && gap(terms[0]).choice === "skip") gap(terms[0]).choice = "note";
   renderGaps();
   if (!$("gapsDlg").open) $("gapsDlg").show();  // non-modal: the Activity pill stays usable
   const rows = [...$("gapsList").querySelectorAll(".gap-row")].filter((r) => terms.includes(r.dataset.term));
@@ -855,10 +829,11 @@ $("gapsList").addEventListener("click", (e) => {
   const c = e.target.closest("[data-c]");
   if (c) {
     g.choice = c.dataset.c;
-    row.querySelectorAll("[data-c]").forEach((b) => { const on = b === c; b.classList.toggle("active", on); b.setAttribute("aria-checked", on); });
-    row.querySelector(".gap-form").hidden = g.choice !== "note";
-    row.querySelector(".gap-explain").hidden = g.choice !== "resume";
-    if (g.choice === "note") { const ta = row.querySelector("textarea"); autosize(ta); ta.focus(); }
+    const i = [...$("gapsList").querySelectorAll(".gap-row")].indexOf(row);
+    row.outerHTML = gapRowHtml(term, i, roleOptions());
+    const now = $("gapsList").querySelector(`.gap-row[data-term="${CSS.escape(term)}"]`);
+    if (g.choice === "note") { const ta = now.querySelector("textarea"); autosize(ta); ta.focus(); }
+    else now.querySelector(`[data-c="${g.choice}"]`).focus();
     return refreshGapsFooter();
   }
   const inc = e.target.closest(".gap-include");
@@ -866,12 +841,15 @@ $("gapsList").addEventListener("click", (e) => {
   const see = e.target.closest(".gap-see");
   if (see) { closeGaps(); focusEdit(see.dataset.see); }
 });
+$("gapsSkipAll").onclick = () => {
+  const terms = gapTerms(), skip = terms.some((t) => gap(t).choice !== "skip");
+  terms.forEach((t) => { gap(t).choice = skip ? "skip" : "add"; });
+  renderGaps();
+};
 $("gapsList").addEventListener("input", (e) => {
   const row = e.target.closest(".gap-row"); if (!row || !e.target.matches("[data-note]")) return;
   gap(row.dataset.term).note = e.target.value;
   autosize(e.target);
-  const hint = row.querySelector(".gap-hint"), h = gapHint(e.target.value);
-  hint.textContent = h; hint.classList.toggle("low", !!h);
   refreshGapsFooter();
 });
 $("gapsList").addEventListener("change", (e) => {
@@ -880,7 +858,7 @@ $("gapsList").addEventListener("change", (e) => {
 $("gapsSubmit").onclick = async () => {
   const terms = gapTerms().filter(gapReady); if (!terms.length) return;
   const items = terms.map((t) => ({ term: t, mode: gap(t).choice, justification: gap(t).choice === "note" ? gap(t).note.trim() : "", role: gap(t).role }));
-  $("gapsSubmit").disabled = true; $("gapsSubmit").textContent = `Asking Claude about ${items.length}…`;
+  $("gapsSubmit").disabled = true; $("gapsSubmit").textContent = `Adding ${items.length} keyword${items.length === 1 ? "" : "s"}…`;
   status($("gapsStatus"), "Starting…", "info", true);
   try {
     const d = await runJob("/api/jobs/justify_keywords", { session_id: state.resume.session_id, items, accepted: acceptedEdits() }, (job) => {
@@ -889,29 +867,19 @@ $("gapsSubmit").onclick = async () => {
       if (job.status === "running" && current) status($("gapsStatus"), `${current.message}… (step ${cur + 1} of ${n})`, "info", true);
     });
     for (const x of d.decisions) {
-      const g = gap(x.term), mode = items.find((i) => i.term === x.term)?.mode;
-      g.reply = x; g.sent = gapInput(x.term);
-      const carriers = d.changes.filter((c) => (c.jd_keywords || []).includes(x.term));
-      if (x.decision === "add") {
-        // a note-based keyword counts as added if any accepted (note-sourced) edit carries it
-        g.status = mode === "resume" || !carriers.some((c) => c.source !== "resume") ? "drafted" : "added";
-        g.changeId = (carriers.find((c) => c.source !== "resume") || carriers[0] || {}).id;
-      } else {
-        g.status = "declined"; g.changeId = null;
-        if (mode === "resume") { g.choice = "note"; g.sent = "resume"; }  // nothing in the resume: ask the user instead
-      }
+      const g = gap(x.term);
+      g.reply = x;
+      const carrier = d.changes.find((c) => (c.jd_keywords || []).includes(x.term));
+      g.status = carrier ? "added" : "missed"; g.changeId = carrier ? carrier.id : null;
     }
-    const added = d.decisions.filter((x) => gap(x.term).status === "added").length;
-    const drafted = d.decisions.filter((x) => gap(x.term).status === "drafted").length;
-    const more = d.decisions.length - added - drafted;
-    state.gapsSummary = [added && `Added ${added}`, drafted && `${drafted} drafted for you to review`,
-      more && `${more} need${more === 1 ? "s" : ""} more from you`].filter(Boolean).join(" · ");
+    const added = d.decisions.filter((x) => gap(x.term).status === "added").length, more = d.decisions.length - added;
+    const weak = d.decisions.filter((x) => gap(x.term).status === "added" && x.evidence === "weak").length;
+    state.gapsSummary = [added && `Added ${added}`, weak && `${weak} to double-check`, more && `${more} couldn't be placed`]
+      .filter(Boolean).join(" · ");
     status($("gapsStatus"), "", "info");
     if (d.changes.length) mergeChanges(d.changes);
     gapsJob = null; renderGaps();
-    const firstDeclined = $("gapsList").querySelector(".gap-row.declined textarea");
-    if (firstDeclined) firstDeclined.focus();
-    toast(state.gapsSummary, added || drafted ? "ok" : "");
+    toast(state.gapsSummary, added ? "ok" : "");
   } catch (err) { status($("gapsStatus"), err.cancelled ? "Stopped." : err.message, err.cancelled ? "info" : "err"); }
   finally { gapsJob = null; refreshGapsFooter(); }
 };
@@ -926,8 +894,8 @@ function mergeChanges(newChanges) {
   const pos = Object.fromEntries(state.resume.paragraphs.map((p, n) => [p.id, n]));  // reading order
   state.analysis.changes = state.analysis.changes.filter((c) => !targets.has(c.target_id)).concat(newChanges)
     .sort((a, b) => (pos[a.target_id] ?? 0) - (pos[b.target_id] ?? 0));
-  // edits Claude drafted from the resume wait for the user to accept; note-based ones go straight in
-  newChanges.forEach((c) => { if (c.source !== "resume") state.selected.add(c.id); });
+  // keyword edits go straight in; the user can still skip any of them on the page
+  newChanges.forEach((c) => state.selected.add(c.id));
   setFilter("all"); state.kwFilter = null;
   update();
   newChanges.forEach((c) => { const el = document.querySelector(`[data-change="${CSS.escape(c.id)}"]`); if (el) el.classList.add("added-now"); });
@@ -1033,7 +1001,7 @@ function update() {
     || '<span class="muted small">Every keyword is covered.</span>';
   $("kwInCount").textContent = `(${inKw.length})`; $("kwOutCount").textContent = `(${outKw.length})`;
   $("gapsOpen").hidden = !outKw.length; $("kwGaps").hidden = !outKw.length;
-  $("gapsOpen").textContent = `Fill gaps (${outKw.length})`;
+  $("gapsOpen").textContent = `Add ${outKw.length} keyword${outKw.length === 1 ? "" : "s"}`;
   if ($("gapsDlg").open && !gapsJob) renderGaps();
   hideTip();
   if (state.pop) renderPop();

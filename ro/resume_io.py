@@ -400,8 +400,12 @@ def contact_header(paragraphs: list[dict], edits: dict[str, str] | None = None) 
 
 # --------------------------------------------------------------------------- Typography
 def kw_regex(term: str) -> re.Pattern:
-    """Whole words, flexible spaces/hyphens, simple plurals. Group "k" is the keyword itself."""
-    t = re.escape(term.strip()).replace(r"\ ", r"[\s-]+")
+    """Whole words, flexible spaces/hyphens, simple plurals either way ("CI/CD pipelines" matches "CI/CD pipeline").
+    Group "k" is the keyword itself."""
+    term = term.strip()
+    if re.search(r"(?:[a-z]{3}[^s\W]|[A-Z]{2})s$", term):  # a plural ("pipelines", "APIs"): match the singular too
+        term = term[:-1]
+    t = re.escape(term).replace(r"\ ", r"[\s-]+")
     return re.compile(rf"(?:^|(?<=[^A-Za-z0-9]))(?P<k>{t}(?:s|es)?)(?=$|[^A-Za-z0-9])", re.I)
 
 

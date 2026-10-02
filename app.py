@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -124,7 +125,7 @@ class CoverIn(BaseModel):
 
 class JustifyItem(BaseModel):
     term: str
-    mode: str = "note"          # "note": the candidate describes it · "resume": Claude drafts it from the resume
+    mode: str = "add"           # "add": Claude researches it and writes it in · "note": the candidate describes it · "skip": leave it out
     justification: str = ""
     role: str = ""
 
@@ -238,30 +239,123 @@ def _justify_check(body: JustifyIn) -> dict:
     if not s.get("jd"):
         _err(400, "Analyze the job first.")
     items = [i for i in body.items if i.term.strip()]
-    if not items:
-        _err(400, "Choose “Describe it” or “Write it from my resume” for at least one keyword.")
-    bad = [i.term for i in items if i.mode not in ("note", "resume")]
+    bad = [i.term for i in items if i.mode not in ("add", "note", "skip")]
     if bad:
         _err(400, f"Unknown option for {', '.join(bad)}.")
-    short = [i.term for i in items if i.mode == "note" and len(i.justification.split()) < 3]
-    if short:
-        _err(400, "Add a few words about " + ", ".join(short) + " — where and how did you use it?")
+    if not any(i.mode != "skip" for i in items):
+        _err(400, "Choose “Add it” or “Describe it” for at least one keyword.")
+    empty = [i.term for i in items if i.mode == "note" and not i.justification.strip()]
+    if empty:
+        _err(400, "Write a quick note about " + ", ".join(empty) + ", or switch it to “Add it”.")
     return s
+
+
+SKILLS_CAP = 3  # new Skills-line items per run: more reads as keyword stuffing
+_SEPS = (", ", " | ", " · ", " • ")
+# where a new tool sits in a skills list: right after the first of these already there
+RELATED = {"postgresql": ("sql", "mysql"), "mysql": ("sql", "postgresql"), "sqlite": ("sql",), "mongodb": ("sql", "redis"),
+           "redis": ("postgresql", "sql"), "kubernetes": ("docker",), "helm": ("kubernetes", "docker"),
+           "docker": ("kubernetes", "aws"), "terraform": ("aws", "gcp", "azure", "docker"), "ansible": ("terraform", "docker"),
+           "grafana": ("prometheus",), "prometheus": ("grafana", "docker"), "datadog": ("grafana", "prometheus"),
+           "fastapi": ("flask", "django"), "django": ("flask", "fastapi"), "flask": ("django", "fastapi", "python"),
+           "typescript": ("javascript",), "javascript": ("typescript",), "react": ("typescript", "javascript"),
+           "node.js": ("javascript", "typescript"), "kafka": ("rabbitmq", "redis"), "rabbitmq": ("kafka",),
+           "gcp": ("aws", "azure"), "azure": ("aws", "gcp"), "github actions": ("git", "jenkins"), "jenkins": ("git",),
+           "ci/cd": ("git", "jenkins"), "ci/cd pipelines": ("git", "jenkins"), "pytest": ("python",), "go": ("python", "java"), "java": ("python", "go")}
+
+
+def _seps(t: str) -> int:
+    return max(t.count(x.strip()) for x in _SEPS)
+
+
+def _is_skills_list(p: dict, text: str) -> bool:
+    return "skill" in p["section"].lower() and p["kind"] != "heading" and _seps(text) >= 2
+
+
+def _split_list(text: str) -> tuple[str, list[str], str]:
+    """'Python, Flask, SQL.' -> (', ', ['Python', 'Flask', 'SQL'], '.')"""
+    sep = max(_SEPS, key=lambda x: text.count(x.strip()))
+    end = re.search(r"[.;]$", text.rstrip())
+    body = text.rstrip()[:-1] if end else text.rstrip()
+    return sep, [x.strip() for x in body.split(sep.strip())], end.group(0) if end else ""
+
+
+_CONCEPT = re.compile(r"\b(architecture|design|ownership|engineering|development|management|practices|principles|"
+                      r"culture|collaboration|leadership|mindset)\b|(ility|ing)$", re.I)
+
+
+def _skill_ok(term: str, soft: set[str]) -> bool:
+    """Only concrete tools fit a skills list: no soft skills, no phrase longer than two words, and no practices or
+    qualities ("microservices architecture", "end-to-end ownership", "scalability", "mentoring")."""
+    return term.lower() not in soft and len(term.split()) <= 2 and not _CONCEPT.search(term.strip())
+
+
+def _insert_related(items: list[str], term: str) -> list[str]:
+    low = [x.lower() for x in items]
+    for rel in RELATED.get(term.lower(), ()):
+        for n, x in enumerate(low):
+            if x == rel or x.endswith(": " + rel):  # "Languages: Python"
+                return items[:n + 1] + [term] + items[n + 1:]
+    words = {w for w in re.findall(r"[a-z]{3,}", term.lower())}
+    for n, x in enumerate(low):  # same family by name: "SQL" -> "PostgreSQL", "AWS Lambda" -> "AWS"
+        if any(w in x for w in words) or any(len(y) >= 3 and y in term.lower() for y in re.findall(r"[a-z.]+", x)):
+            return items[:n + 1] + [term] + items[n + 1:]
+    return items + [term]
+
+
+def _trim_skills_change(c: dict, before: str, terms: list[str], soft: set[str], budget: list[int]) -> None:
+    """Hold Claude's Skills-line edit to the rules: drop soft skills and long phrases, keep within the cap."""
+    sep, items, end = _split_list(c["new_text"])
+    old = {x.lower() for x in _split_list(before)[1]}
+    out = []
+    for x in items:
+        if x.lower() in old or not x:
+            out.append(x); continue
+        hit = next((t for t in terms if analyzer.mentions(x, t)), None)
+        if hit and _skill_ok(hit, soft) and budget[0] > 0:
+            budget[0] -= 1; out.append(x)
+        elif not hit and budget[0] > 0:  # not one of ours (Claude regrouped something): leave it, but count it
+            budget[0] -= 1; out.append(x)
+    c["new_text"] = sep.join(out) + end
+
+
+def _skills_fallback(paragraphs: list[dict], edits: dict[str, str], kept: list[dict], terms: list[str],
+                     cid: str) -> tuple[list[dict], list[str]]:
+    """Insert terms into the resume's skills list (the Skills-section line with the most items), each next to
+    the item it relates to. Builds on an edit already made to that line. Returns (kept, terms placed)."""
+    lines = [p for p in paragraphs if p["text"].strip() and _is_skills_list(p, edits.get(p["id"], p["text"]))]
+    if not lines or not terms:
+        return kept, []
+    p = max(lines, key=lambda p: _seps(edits.get(p["id"], p["text"])))
+    prior = next((c for c in kept if c["target_id"] == p["id"]), None)
+    sep, items, end = _split_list(prior["new_text"] if prior else edits.get(p["id"], p["text"]))
+    for t in terms:
+        items = _insert_related(items, t)
+    new_text = sep.join(items) + end
+    note = f"Added {', '.join(terms)} to your skills list."
+    if prior:
+        prior.update(new_text=new_text, jd_keywords=prior["jd_keywords"] + terms,
+                     from_input=", ".join(prior["jd_keywords"] + terms))
+        prior["reason"] = f"{prior['reason']} {note}".strip()
+        return kept, terms
+    return kept + [{"id": cid, "target_id": p["id"], "section": p["section"], "kind": p["kind"],
+                    "original_text": p["text"], "new_text": new_text, "type": "keyword", "reason": note,
+                    "jd_keywords": terms, "warnings": [], "from_input": ", ".join(terms), "source": "add"}], terms
 
 
 def _justify_work(s: dict, body: JustifyIn) -> dict:
     items = [{"term": i.term.strip(), "mode": i.mode, "justification": i.justification.strip() if i.mode == "note" else "",
-              "role": i.role.strip()} for i in body.items if i.term.strip()]
+              "role": i.role.strip()} for i in body.items if i.term.strip() and i.mode != "skip"]
     asked = {i["term"].lower(): i["term"] for i in items}
-    from_resume = {i["term"] for i in items if i["mode"] == "resume"}
+    researched = {i["term"] for i in items if i["mode"] == "add"}
     edits = {e.target_id: e.new_text for e in body.accepted}
     noted = [i for i in items if i["mode"] == "note"]
     emit("note", "running", f"Reading your input for {_plural(len(items), 'keyword')}")
     s.setdefault("justifications", []).extend(noted)  # only the candidate's own words become evidence
-    emit("note", "done", ", ".join(i["term"] + (" (from resume)" if i["mode"] == "resume" else "") for i in items))
+    emit("note", "done", ", ".join(i["term"] + (" (your note)" if i["mode"] == "note" else "") for i in items))
     check()
     try:
-        emit("decide", "running", f"Asking {_engine_label()} to decide and place {_plural(len(items), 'keyword')}")
+        emit("decide", "running", f"Asking {_engine_label()} to research and place {_plural(len(items), 'keyword')}")
         raw = analyzer.decide_keywords(s["jd"], s["paragraphs"], edits, items)
     except analyzer.AIError as e:
         _err(502, str(e))
@@ -271,26 +365,30 @@ def _justify_work(s: dict, body: JustifyIn) -> dict:
     for d in raw.get("decisions", []) or []:
         term = asked.get((d.get("term") or "").strip().lower())
         if term and term not in decisions:  # ignore terms we didn't ask about
-            decisions[term] = {"term": term, "decision": d.get("decision") if d.get("decision") in ("add", "decline") else "decline",
+            decisions[term] = {"term": term, "evidence": "weak" if d.get("evidence") == "weak" else "strong",
                                "explanation": (d.get("explanation") or "").strip(),
-                               "follow_up_question": (d.get("follow_up_question") or "").strip()}
+                               "based_on": (d.get("based_on") or "").strip()}
     for term in asked.values():
-        decisions.setdefault(term, {"term": term, "decision": "decline", "explanation": "Claude didn't reach a decision on this one.",
-                                    "follow_up_question": f"Where did you use {term}, and what did you do with it?"})
-    adding = [t for t, d in decisions.items() if d["decision"] == "add"]
-    emit("decide", "done", f"{len(adding)} to add, {len(decisions) - len(adding)} need more detail",
+        decisions.setdefault(term, {"term": term, "evidence": "weak", "explanation": "", "based_on": ""})
+    emit("decide", "done", f"Placed {_plural(len(decisions), 'keyword')}",
          detail=[f"{d['term']}: {d['explanation']}" for d in decisions.values() if d["explanation"]] or None)
 
     emit("check", "running", "Checking the new wording against your resume and notes")
     notes = "\n".join(i["justification"] for i in noted)
+    terms = list(asked.values())
     result = analyzer.validate_changes(raw, s["paragraphs"], known_text=notes, id_prefix=f"k{secrets.token_hex(2)}_",
-                                       limit=1 + len(adding), current=edits)
+                                       limit=1 + len(terms), current=edits)
     per_kw: dict[str, int] = {}
     kept, dropped = [], list(result["dropped"])
     # apply the per-keyword limit in Claude's order (ids end in the original index), show in resume order
+    soft = {k["term"].lower() for k in s["jd"].get("keywords", []) if k.get("category") == "soft_skill"}
+    by_id = {p["id"]: p for p in s["paragraphs"]}
+    budget = [SKILLS_CAP]  # new Skills-line items left, shared by Claude's edits and the fallback
     for c in sorted(result["changes"], key=lambda c: int(c["id"].rsplit("_", 1)[1])):
         before = edits.get(c["target_id"], c["original_text"])
-        adds = [t for t in adding if analyzer.mentions(c["new_text"], t) and not analyzer.mentions(before, t)]
+        if _is_skills_list(by_id[c["target_id"]], before):
+            _trim_skills_change(c, before, terms, soft, budget)
+        adds = [t for t in terms if analyzer.mentions(c["new_text"], t) and not analyzer.mentions(before, t)]
         if not adds:
             dropped.append(f"{c['target_id']}: doesn't add any keyword you marked")
             continue
@@ -304,18 +402,32 @@ def _justify_work(s: dict, body: JustifyIn) -> dict:
         for t in adds:
             per_kw[t] = per_kw.get(t, 0) + 1
         c["jd_keywords"], c["from_input"] = adds, ", ".join(adds)
-        drafted = [t for t in adds if t in from_resume]
-        c["source"] = "resume" if drafted else "note"  # anything Claude wrote from the resume needs the user's OK
-        if drafted:
-            c["warnings"].append(f"Written by Claude from your resume ({', '.join(drafted)}) — confirm it's accurate.")
+        c["source"] = "add" if any(t in researched for t in adds) else "note"
         kept.append(c)
+    # a tool no kept edit carries goes on the Skills line, most important first, within the cap
+    rank = {k["term"].lower(): {"required": 0, "preferred": 1}.get(k.get("importance"), 2) for k in s["jd"].get("keywords", [])}
+    tools = sorted((t for t in terms if not per_kw.get(t) and _skill_ok(t, soft)), key=lambda t: rank.get(t.lower(), 2))
+    missing = tools[:max(budget[0], 0)]
+    capped = set(tools[len(missing):])  # tools left out only because the Skills line is full
+    if missing:
+        kept, placed = _skills_fallback(s["paragraphs"], edits, kept, missing, f"k{secrets.token_hex(2)}_s")
+        for t in placed:
+            per_kw[t] = 1
+            decisions[t].update(evidence="weak", explanation=f"Added “{t}” to your Skills line.")
+    for c in kept:
+        weak = [t for t in c["jd_keywords"] if decisions[t]["evidence"] == "weak" and t in researched]
+        if weak:
+            c["warnings"].append(f"Your resume only shows related work for {', '.join(weak)}. Keep it if it's true.")
     pos = {p["id"]: n for n, p in enumerate(s["paragraphs"])}
     kept.sort(key=lambda c: pos.get(c["target_id"], 0))
-    for t in adding:  # an "add" that no kept edit actually carries
-        if not per_kw.get(t):
-            decisions[t].update(decision="decline", explanation="Claude's wording for this couldn't be applied. "
-                                + decisions[t]["explanation"],
-                                follow_up_question=decisions[t]["follow_up_question"] or f"Which bullet or role should mention {t}?")
+    for t, d in decisions.items():
+        d["added"] = bool(per_kw.get(t))
+        if d["added"]:
+            continue
+        d["explanation"] = (f"Your Skills line already got {SKILLS_CAP} new items this round, so “{t}” was left out to "
+                            "avoid keyword stuffing. Use Describe it to say where you used it, or Skip it." if t in capped else
+                            f"No line in your resume fits “{t}” naturally, so it was left out rather than stuffed in. "
+                            "Use Describe it to say where you used it, or Skip it.")
     added = sorted(per_kw)
     flagged = [w for c in kept for w in c["warnings"]]
     emit("check", "done", f"{_plural(len(kept), 'edit')} ready for {_plural(len(added), 'keyword')}"
@@ -602,7 +714,7 @@ def job_cover(body: CoverIn):
 def job_justify(body: JustifyIn):
     s = _justify_check(body)
     n = len([i for i in body.items if i.term.strip()])
-    plan = [("note", f"Read your input ({n})"), ("decide", "Decide and place keywords"), ("check", "Honesty checks")]
+    plan = [("note", f"Read your input ({n})"), ("decide", "Research and place keywords"), ("check", "Honesty checks")]
     return _job_out(jobs.start("justify_keywords", f"Fill {_plural(n, 'keyword gap')}", plan,
                                lambda: _justify_work(s, body)))
 
@@ -675,7 +787,15 @@ def download(token: str):
     return FileResponse(p, filename=p.name, media_type=MEDIA.get(p.suffix.lower(), "application/octet-stream"))
 
 
-app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
+class _FreshStatic(StaticFiles):
+    """Browsers revalidate the UI files on every load, so an updated app never runs stale JS."""
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+app.mount("/", _FreshStatic(directory=Path(__file__).parent / "static", html=True), name="static")
 
 
 def _free_port(start: int) -> int:
