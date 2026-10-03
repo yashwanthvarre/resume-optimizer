@@ -1,25 +1,28 @@
 # Resume Optimizer
 
-Paste a job link, point at your resume, and get a tailored `.docx`. You approve every change first.
+Load your resume, pick one of the fresh jobs Claude finds for it (or paste your own job link), and get a tailored `.docx`. You approve every change first.
 
-1. **Job description:** paste or type a link. The app starts reading the posting straight away: on paste, a moment after you stop typing, or when you leave the field. Changing the link cancels the fetch in progress, and **Retry** appears if a fetch fails.
+1. **Resume:** drop the file in, or type or paste its path on the computer you're using, or click **Browse…** to use your system's file picker. `.docx`, `.pdf` and `.txt` are supported.
+2. **Find jobs:** as soon as the resume is loaded, Claude starts searching for postings that fit it and went up in the last 2 hours (see [Find fresh jobs](#find-fresh-jobs) below). Pick one and it opens in its own tab, ready to tailor.
+3. **Job description:** to tailor for a job you found yourself, paste or type a link. The app starts reading the posting straight away: on paste, a moment after you stop typing, or when you leave the field. Changing the link cancels the fetch in progress, and **Retry** appears if a fetch fails.
    - It has built-in support for Workday, Greenhouse, Lever and LinkedIn, and for any site that publishes standard job data.
    - If a site blocks it, paste the JD text instead.
-2. **Resume:** type or paste the path to your resume on the computer you're using, or click **Browse…** to use your system's file picker. `.docx`, `.pdf` and `.txt` are supported.
-3. **Analyze:** Claude (through your Claude subscription or an API key) pulls the JD's keywords and repeated themes, then proposes small edits, one paragraph each.
-4. **Review:** your resume appears as a page, set exactly as it will download: EB Garamond, body text justified, and the job's keywords in **bold** with no other highlighting. Edited paragraphs carry a thin rule at the left edge (a dotted underline if you skipped the edit). These marks appear on screen only and never in the download. Click (or tap) an edit to see why it was made, a Before / After view, the keywords it adds and any warnings, then **Accept**, **Skip** or **Edit** it. `j` / `k` move between edits. One line above the page shows your keyword progress (e.g. "7 of 10 keywords · +3 · 3 missing"), the All / Accepted / Skipped filter, a **⋯** menu (accept or skip all, show or hide changes, popover view), **Download** and **Cover letter →**. Instructions in the posting about the application itself (e.g. "no AI-generated content") show as a banner you can dismiss.
-5. **Cover letter (optional):** click **Cover letter →**. You can add the hiring manager's name, pick a tone (formal, warm or concise) and say why you want this company. Claude then writes a 250–400 word letter from the job analysis and the resume edits you accepted.
+4. **Analyze:** Claude (through your Claude subscription or an API key) pulls the JD's keywords and repeated themes, then proposes small edits, one paragraph each.
+5. **Review:** your resume appears as a page, set exactly as it will download: EB Garamond, body text justified, and the job's keywords in **bold** with no other highlighting. Edited paragraphs carry a thin rule at the left edge (a dotted underline if you skipped the edit). These marks appear on screen only and never in the download. Click (or tap) an edit to see why it was made, a Before / After view, the keywords it adds and any warnings, then **Accept**, **Skip** or **Edit** it. `j` / `k` move between edits. One line above the page shows your keyword progress (e.g. "7 of 10 keywords · +3 · 3 missing"), the All / Accepted / Skipped filter, a **⋯** menu (accept or skip all, show or hide changes, popover view), **Download** and **Cover letter →**. Instructions in the posting about the application itself (e.g. "no AI-generated content") show as a banner you can dismiss.
+6. **Cover letter (optional):** click **Cover letter →**. You can add the hiring manager's name, pick a tone (formal, warm or concise) and say why you want this company. Claude then writes a 250–400 word letter from the job analysis and the resume edits you accepted.
    - Every paragraph is editable in place, and **Regenerate** writes a new version.
    - "Why each point was made" lists each JD requirement the letter addresses and the line from your resume that backs it up.
    - The letter is flagged ⚠ if it mentions a number that isn't in your resume, falls well outside the target length, or uses a stock phrase.
-6. **Download:** you get a **PDF** that contains only the edits you accepted. A copy is also saved to your downloads folder, which you can change in **Settings (⚙)**.
-   - **File names:** `First_Last_Role_Resume.pdf` and `First_Last_Cover_Letter.pdf`, e.g. `Yashwanth_Varre_Software_Engineer_Resume.pdf`.
+7. **Download:** you get a **PDF** that contains only the edits you accepted. A copy is also saved to your downloads folder, which you can change in **Settings (⚙)**.
+   - **File names:** `First_Last_Company_Role_Resume.pdf`, `First_Last_Company_Role_Cover_Letter.pdf` and `First_Last_Company_Role_Application.zip`, e.g. `Yashwanth_Varre_Acme_Software_Engineer_Resume.pdf`, so files for different jobs never look alike.
      - The name comes from the top of your resume. You can set it in **Settings → Your name for file names** if it isn't detected well.
      - The role is the posting's job title, cleaned up: no brackets, requisition IDs or "Remote", at most 6 words. If the posting has no title, the role is left out.
-     - Names use letters, digits, hyphens and underscores only (accents become plain letters), and stay within 80 characters.
+     - The company is the employer's name, cleaned up: no brackets or legal suffixes (Inc, LLC, Ltd, Corp, GmbH, PLC, S.A., AG …), at most 3 words. If the posting doesn't name one, the company is left out.
+     - If your name isn't found, files are just `Resume`, `Cover_Letter` and `Application`.
+     - Names use letters, digits, hyphens and underscores only (accents become plain letters), and stay within 80 characters. Long names are shortened by dropping role words first, then extra company words, then middle names.
      - A file never overwrites another; `_2`, `_3` and so on are added.
      - The review page and the cover letter screen show the name Download will use.
-     - Each file's document title and author are set too ("Yashwanth Varre Software Engineer Resume", "Yashwanth Varre").
+     - Each file's document title and author are set too ("Yashwanth Varre Acme Software Engineer Resume", "Yashwanth Varre").
    - **File format** (Settings): PDF (default), Word `.docx`, or both. "Both" downloads the PDF and saves the `.docx` next to it.
    - **How the PDF is made:** the app builds the `.docx` first, then converts it, so the PDF matches the Word layout exactly. It uses **LibreOffice** (free, [download](https://www.libreoffice.org/download/)) if installed, otherwise **Microsoft Word** on macOS or Windows (`pip install docx2pdf`).
      - Settings shows which converter was found.
@@ -42,6 +45,13 @@ Paste a job link, point at your resume, and get a tailored `.docx`. You approve 
    - If the resume PDF runs past one page, the save message says so.
    - The cover letter downloads as its own file (`First_Last_Cover_Letter.pdf`), with your name and contact line from the resume as the letterhead. **Download both (.zip)** bundles the resume and the cover letter as `First_Last_Role_Application.zip`.
    - Your original file is never modified.
+
+<a id="find-fresh-jobs"></a>**Find fresh jobs:** this runs by itself once your resume is loaded, looking for up to 5 jobs posted in the last 2 hours. Loading the same resume again doesn't repeat the search; loading a different one does. **Search again** re-runs it, for example a little later when new postings are up. Claude searches the web (LinkedIn, Indeed, Greenhouse, Lever, Workday, company career pages…) for postings that fit your resume.
+- Only postings whose page shows they went up within the last 2 hours are kept. "Today", "1 day ago", "Reposted" or no visible time don't count. The app re-checks every age and link itself, and drops duplicates and search-result pages. If fewer than 5 qualify, you see fewer; the list is never padded with older jobs.
+- Each job shows its title (linked to the posting), company, location, how long ago it was posted and why it fits.
+- **Tailor resume + cover letter** opens that job in a new tab. The tab loads the same resume into its own session, fetches the posting and starts the analysis, so every job keeps its own edits, cover letter and file names, and the tab title names the job. **Tailor all** opens one tab per job (allow pop-ups if your browser blocks them).
+- The search takes a few minutes, can be cancelled from the Activity panel or the Cancel button, and counts toward your Claude usage like any other request. While it runs you can still paste a job link of your own and tailor for it.
+- Tabs opened from the list don't search again; they go straight to their one job.
 
 **Print / Save as PDF** (Ctrl/Cmd+P) on the review screen gives a clean copy: the job, any notice from the posting, and your resume with the accepted edits and no editing marks. On the cover-letter screen it prints just the letter.
 

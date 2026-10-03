@@ -113,14 +113,14 @@ r = c.post("/api/jobs/export", json={"session_id": sid, "accepted": accepted, "o
 assert [p["step"] for p in r.json()["plan"]] == ["resume_docx", "cover_docx", "zip"]
 evs, end = sse(r.json()["job_id"])
 res = end["result"]; assert end["status"] == "done", end
-assert Path(res["path"]).name == "Alex_Sample_Backend_Engineer_Resume.docx"
-assert Path(res["cover"]["path"]).name == "Alex_Sample_Cover_Letter.docx"
+assert Path(res["path"]).name == "Alex_Sample_Globex_Backend_Engineer_Resume.docx"
+assert Path(res["cover"]["path"]).name == "Alex_Sample_Globex_Backend_Engineer_Cover_Letter.docx"
 doc = [p.text for p in Document(res["cover"]["path"]).paragraphs]
 assert doc[0] == "ALEX SAMPLE" and doc[1].startswith("alex@example.com")
 assert letter["greeting"] in doc and letter["paragraphs"][0] in doc and doc[-1] == "Alex Sample"
 zr = c.get(res["zip"]["download_url"]); assert zr.status_code == 200 and zr.headers["content-type"] == "application/zip"
 zp = Path(tempfile.mkdtemp()) / "a.zip"; zp.write_bytes(zr.content)
-assert sorted(zipfile.ZipFile(zp).namelist()) == ["Alex_Sample_Backend_Engineer_Resume.docx", "Alex_Sample_Cover_Letter.docx"]
+assert sorted(zipfile.ZipFile(zp).namelist()) == ["Alex_Sample_Globex_Backend_Engineer_Cover_Letter.docx", "Alex_Sample_Globex_Backend_Engineer_Resume.docx"]
 # cover letter only
 r = c.post("/api/export", json={"session_id": sid, "accepted": [], "output_dir": str(out), "include_resume": False,
                                 "cover_letter": letter, "company": "Globex", "role": "Backend Engineer"})

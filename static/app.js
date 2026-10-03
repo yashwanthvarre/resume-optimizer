@@ -37,8 +37,8 @@ function updateSteps() {
   const inReview = !$("reviewView").hidden, inCover = !$("coverView").hidden, past = inReview || inCover;
   const jdOk = $("jdText").value.trim().length > MIN_JD, resOk = !!state.resume;
   const st = {
-    jd: jdOk || past ? "done" : "current",
-    resume: resOk || past ? "done" : jdOk ? "current" : "",
+    resume: resOk || past ? "done" : "current",
+    jd: jdOk || past ? "done" : resOk ? "current" : "",
     review: inReview ? (state.exported ? "done" : "current") : inCover ? "done" : "",
     cover: inCover ? (state.cover ? "done" : "current") : state.cover ? "done" : "",
     export: state.exported ? "done" : "",
@@ -65,14 +65,17 @@ async function init() {
   const ready = state.cfg.active_engine === "claude_code" ? !!state.cfg.claude_code_path : state.cfg.has_api_key;
   if (!ready) setTimeout(openSettings, 300);
   refreshAnalyze();
+  const q = new URLSearchParams(location.search);
+  if (q.get("job")) await openFromFinder(q);
 }
 
 function refreshAnalyze() {
   const n = $("jdText").value.trim().length, jdOk = n > MIN_JD && !fetchJob;
   $("analyzeBtn").disabled = !(state.resume && jdOk) || analyzing;
+  $("findJobsBtn").disabled = !state.resume || !!findJob;
   const need = [];
-  if (!jdOk) need.push("the job");
   if (!state.resume) need.push("your resume");
+  if (!jdOk) need.push(state.resume ? "a job (pick one above or add your own)" : "a job");
   $("analyzeNeed").textContent = analyzing ? "" : need.length ? `Add ${need.join(" and ")} to continue.` : "Ready when you are.";
   const c = $("jdCounter");
   c.textContent = n ? `${n.toLocaleString()} characters` : "";
@@ -153,6 +156,7 @@ function onResumeLoaded(d) {
       detail: [...new Set(d.paragraphs.filter((x) => x.kind === "heading").map((x) => x.text.trim()))] },
   ]);
   refreshAnalyze();
+  autoFind();
 }
 function onResumeFailed(msg) {
   state.resume = null;
@@ -193,6 +197,102 @@ const dz = $("dropzone");
 dz.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) uploadFile(f); });
 // dropping anywhere else on the page shouldn't navigate away
 ["dragover", "drop"].forEach((ev) => window.addEventListener(ev, (e) => e.preventDefault()));
+
+// ------------------------------------------------------------------ find fresh jobs
+// Claude searches the web for postings that fit the loaded resume and are under 2 hours old. The search starts
+// by itself once a resume is loaded (not in tabs opened from the list); "Search again" re-runs it. Each job opens
+// in a new tab (/?job=…&from=<session>) that clones the resume into its own server session, fetches the posting
+// and starts the usual analysis, so every job keeps its own edits, cover letter and file names.
+let findJob = null, foundAt = 0, searchedFor = "";
+const resumeKey = () => state.resume ? state.resume.paragraphs.map((x) => x.text).join("\n") : "";
+// Runs once per distinct resume: reloading the same file doesn't search again, and a resume swapped in
+// mid-search is searched for when the current search ends.
+function autoFind() {
+  if ($("findCard").hidden || !state.resume || findJob || resumeKey() === searchedFor) return;
+  $("findJobsBtn").click();
+}
+const BASE_TITLE = document.title;
+function setTabTitle(label) { document.title = label ? `${label} · ${BASE_TITLE}` : BASE_TITLE; }
+const ago = (min) => min < 1 ? "just now" : min < 60 ? `${min} min ago` : `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""} ago`;
+
+$("findJobsBtn").onclick = async () => {
+  findJob = { status: "starting" }; searchedFor = resumeKey(); refreshAnalyze();
+  $("findJobsBtn").hidden = true; $("findCancel").hidden = false; $("findResults").hidden = true;
+  status($("findStatus"), "Claude is searching job boards. This can take a few minutes.", "info", true);
+  try {
+    const d = await runJob("/api/jobs/find_jobs", { session_id: state.resume.session_id }, (job) => {
+      findJob = job;
+      const { current } = jobProgress(job);
+      if (job.status === "running" && current) status($("findStatus"), current.message + "…", "info", true);
+    });
+    foundAt = Date.now();
+    renderJobs(d);
+  } catch (e) {
+    status($("findStatus"), e.cancelled ? "Search cancelled." : e.message, e.cancelled ? "info" : "err");
+  } finally {
+    findJob = null; $("findCancel").hidden = true; $("findJobsBtn").hidden = false;
+    refreshAnalyze();
+    autoFind();
+  }
+};
+$("findCancel").onclick = () => cancelJob(findJob);
+
+function renderJobs(d) {
+  state.foundJobs = d.jobs;
+  const n = d.jobs.length, left = d.dropped.length ? ` ${d.dropped.length} older or unverifiable posting${d.dropped.length === 1 ? " was" : "s were"} left out.` : "";
+  if (!n) {
+    $("findResults").hidden = true;
+    return status($("findStatus"), `No postings from the last 2 hours matched your resume.${left} Try again a little later.`, "info");
+  }
+  status($("findStatus"), `Found ${n} job${n === 1 ? "" : "s"} posted in the last 2 hours${n < 5 ? " (fewer than 5 qualified)" : ""}.${left}`, "ok");
+  const since = Math.round((Date.now() - foundAt) / 60000);
+  $("jobList").innerHTML = d.jobs.map((j, i) => `<li class="job" data-i="${i}">
+      <div>
+        <div class="job-title"><a href="${esc(j.url)}" target="_blank" rel="noopener">${esc(j.title)}</a></div>
+        <div class="job-meta">${[j.company, j.location, `posted ${ago(j.age_minutes + since)}`, j.source].filter(Boolean).map(esc).join(" · ")}</div>
+      </div>
+      <button class="primary sm" data-open="${i}">Tailor resume + cover letter</button>
+      ${j.match_reason ? `<div class="job-why">${esc(j.match_reason)}</div>` : ""}
+    </li>`).join("");
+  $("tailorAll").textContent = `Tailor all ${n} in new tabs`;
+  $("findResults").hidden = false;
+}
+function openJob(i) {
+  const j = state.foundJobs[i];
+  const q = new URLSearchParams({ job: j.url, from: state.resume.session_id, title: j.title, company: j.company });
+  const w = window.open(`${location.pathname}?${q}`, "_blank");
+  if (!w) return false;
+  w.opener = null;
+  document.querySelector(`.job[data-i="${i}"]`).classList.add("opened");
+  document.querySelector(`[data-open="${i}"]`).textContent = "Opened in a new tab ↗";
+  return true;
+}
+$("jobList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-open]");
+  if (b && !openJob(+b.dataset.open)) toast("Your browser blocked the new tab. Allow pop-ups for this page and try again.", "err");
+});
+$("tailorAll").onclick = () => {
+  const blocked = state.foundJobs.filter((_, i) => !openJob(i)).length;
+  if (blocked) toast(`${blocked} tab${blocked === 1 ? " was" : "s were"} blocked. Allow pop-ups for this page, or open them one at a time.`, "err");
+};
+
+// A tab opened from the list: same resume (fresh session), this job's posting, then straight into Analyze.
+async function openFromFinder(q) {
+  setTabTitle([q.get("company"), q.get("title")].filter(Boolean).join(" – "));
+  history.replaceState(null, "", location.pathname);  // a reload starts clean instead of re-running
+  $("findCard").hidden = true;
+  $("jdStepNo").textContent = "2"; $("jdHint").hidden = true;
+  $("jdUrl").value = q.get("job");
+  const resume = (async () => {
+    if (!q.get("from")) return;
+    status($("resumeStatus"), "Loading your resume…", "info", true);
+    try { onResumeLoaded(await api("/api/resume/clone", { session_id: q.get("from") })); }
+    catch (e) { onResumeFailed(`${e.message} Then click Analyze.`); }
+  })();
+  await Promise.all([fetchJd(true), resume]);
+  if (!$("analyzeBtn").disabled) $("analyzeBtn").click();
+  else if (state.resume) status($("analyzeStatus"), "Couldn't read this posting automatically. Paste the job description above, then click Analyze.", "info");
+}
 
 // ------------------------------------------------------------------ background jobs + activity
 // Long operations run as server jobs. Their progress events arrive over Server-Sent Events
@@ -483,6 +583,7 @@ function showReview() {
   $("setupView").hidden = true; $("reviewView").hidden = false; $("restartBtn").hidden = false;
   const jd = state.analysis.jd;
   $("rvRole").textContent = [jd.role, jd.company].filter((x) => x && x !== "Not specified").join(" · ") || "Your resume";
+  setTabTitle([jd.company, jd.role].filter((x) => x && x !== "Not specified").join(" – "));
   $("rvAssessment").textContent = state.analysis.overall_assessment || jd.summary || "";
   $("rvAssessment").classList.remove("open");
   const notices = state.analysis.notices || [];
@@ -1035,6 +1136,7 @@ $("restartBtn").onclick = () => {
   $("fetchBtn").disabled = false; $("fetchBtn").textContent = "Fetch";
   $("jdUrl").value = ""; $("jdText").value = ""; $("jdBox").hidden = true; status($("jdStatus"), "", "info");
   state.exported = false;
+  setTabTitle("");
   window.scrollTo(0, 0);
   refreshAnalyze();
 };
