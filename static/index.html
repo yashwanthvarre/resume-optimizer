@@ -15,8 +15,8 @@
   <div class="brand"><span class="logo" aria-hidden="true">R</span><span class="brand-name">Resume Optimizer</span></div>
   <!-- the step list drives the text indicator; it's read by screen readers, the indicator is what's shown -->
   <ol class="sr-only" id="stepper" aria-label="Progress">
-    <li data-step="jd"><span class="lbl">Job</span></li>
     <li data-step="resume"><span class="lbl">Resume</span></li>
+    <li data-step="jd"><span class="lbl">Job</span></li>
     <li data-step="review"><span class="lbl">Review</span></li>
     <li data-step="cover"><span class="lbl">Cover letter</span></li>
     <li data-step="export"><span class="lbl">Download</span></li>
@@ -35,27 +35,11 @@
 <main id="setupView" class="setup">
   <div class="intro">
     <h1>Tailor your resume to a job</h1>
-    <p class="muted">Add the job and your resume. You'll review every suggested edit before anything is saved.</p>
+    <p class="muted">Add your resume and Claude finds fresh jobs that fit it, or add a job yourself. You'll review every suggested edit before anything is saved.</p>
   </div>
 
-  <section class="card" id="jdCard">
-    <div class="card-head"><span class="step-no">1</span><h2>The job</h2></div>
-    <label class="label" for="jdUrl">Job posting link</label>
-    <div class="row">
-      <input id="jdUrl" type="url" placeholder="Workday, LinkedIn, Greenhouse, Lever…">
-      <button class="secondary" id="fetchBtn">Fetch</button>
-    </div>
-    <button type="button" class="linklike" id="pasteLink">Or paste the job description</button>
-    <div id="jdStatus" class="status"></div>
-    <div id="jdBox" hidden>
-      <div class="jd-meta"><strong id="jdTitle"></strong><span id="jdMethod" class="tag"></span></div>
-      <textarea id="jdText" rows="9" placeholder="Paste the full job description here…"></textarea>
-      <div class="jd-foot"><span class="hint">Check this is the right job. You can edit the text.</span><span class="counter" id="jdCounter"></span></div>
-    </div>
-  </section>
-
   <section class="card" id="resumeCard">
-    <div class="card-head"><span class="step-no">2</span><h2>Your resume</h2></div>
+    <div class="card-head"><span class="step-no">1</span><h2>Your resume</h2></div>
     <label class="dropzone" id="dropzone" for="uploadInput">
       <span class="dz-icon" aria-hidden="true">↑</span>
       <span class="dz-title">Drop your resume here</span>
@@ -72,6 +56,41 @@
       <div class="hint">For example <code>~/Documents/resume.docx</code> or a pasted “Copy as path”.</div>
     </details>
     <div id="resumeStatus" class="status"></div>
+  </section>
+
+  <section class="card" id="findCard">
+    <div class="card-head"><span class="step-no">2</span><h2>Jobs Claude found for you</h2></div>
+    <p class="hint">As soon as your resume is loaded, Claude searches the web for postings that fit it and were posted
+      in the last 2 hours. Each job you pick opens in its own tab, with its own resume and cover letter.</p>
+    <div class="row find-row">
+      <button class="secondary" id="findJobsBtn" hidden>Search again</button>
+      <button class="ghost sm" id="findCancel" hidden>Cancel</button>
+    </div>
+    <div id="findStatus" class="status info">Load your resume and the search starts by itself.</div>
+    <div id="findResults" hidden>
+      <ol class="job-list" id="jobList"></ol>
+      <div class="job-foot">
+        <button class="secondary sm" id="tailorAll">Tailor all in new tabs</button>
+        <span class="hint">If only one tab opens, allow pop-ups for this page.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="jdCard">
+    <div class="card-head"><span class="step-no" id="jdStepNo">3</span><h2>The job</h2></div>
+    <p class="hint" id="jdHint">Pick one of the jobs above, or add one yourself here.</p>
+    <label class="label" for="jdUrl">Job posting link</label>
+    <div class="row">
+      <input id="jdUrl" type="url" placeholder="Workday, LinkedIn, Greenhouse, Lever…">
+      <button class="secondary" id="fetchBtn">Fetch</button>
+    </div>
+    <button type="button" class="linklike" id="pasteLink">Or paste the job description</button>
+    <div id="jdStatus" class="status"></div>
+    <div id="jdBox" hidden>
+      <div class="jd-meta"><strong id="jdTitle"></strong><span id="jdMethod" class="tag"></span></div>
+      <textarea id="jdText" rows="9" placeholder="Paste the full job description here…"></textarea>
+      <div class="jd-foot"><span class="hint">Check this is the right job. You can edit the text.</span><span class="counter" id="jdCounter"></span></div>
+    </div>
   </section>
 
   <div class="analyze-bar">
@@ -295,7 +314,7 @@
     <div class="hint" id="pdfState"></div>
     <label class="label" for="nameOverride">Your name for file names</label>
     <input id="nameOverride" type="text" spellcheck="false" autocomplete="name" placeholder="Taken from your resume">
-    <div class="hint">Files are named like <code>First_Last_Role_Resume.pdf</code> and <code>First_Last_Cover_Letter.pdf</code>. Leave this blank to use the name at the top of your resume.</div>
+    <div class="hint">Files are named like <code>First_Last_Company_Role_Resume.pdf</code> and <code>First_Last_Company_Role_Cover_Letter.pdf</code>. Leave this blank to use the name at the top of your resume.</div>
     <label class="label" for="docFont">Document font</label>
     <select id="docFont">
       <option value="EB Garamond">EB Garamond</option>

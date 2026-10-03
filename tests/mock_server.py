@@ -9,6 +9,13 @@ from ro import analyzer, jd_fetch
 sys.path.insert(0, str(Path(__file__).parent))
 from test_e2e_data import JD, CH, COVER, keyword_decisions
 CANNED = {"record_jd": JD, "record_changes": CH, "record_cover_letter": COVER}
+CANNED["record_jobs"] = {"profile": "Backend engineer, Python/AWS, remote", "jobs": [
+    {"title": "Backend Engineer", "company": "Globex", "location": "Remote", "url": "https://jobs.example.test/globex",
+     "posted_at": "35 minutes ago", "posted_age_minutes": 35, "match_reason": "Python services on AWS.", "source": "Greenhouse"},
+    {"title": "Platform Engineer", "company": "Initech", "location": "Austin, TX", "url": "https://jobs.example.test/initech",
+     "posted_at": "1 hour ago", "posted_age_minutes": 60, "match_reason": "REST APIs and Docker.", "source": "Lever"},
+    {"title": "Senior Engineer", "company": "Hooli", "url": "https://jobs.example.test/hooli",
+     "posted_at": "1 day ago", "posted_age_minutes": 1440, "match_reason": "Too old; must be dropped."}]}
 def fake(s, u, tool, mt):
     time.sleep(float(os.environ.get("MOCK_DELAY", "1.5")))  # lets the progress UI be seen
     if tool["name"] == "record_keyword_decisions":

@@ -270,23 +270,23 @@ def _client():
     return anthropic.Anthropic()
 
 
-# calls that may look things up on the web: only the keyword step, to learn what a keyword usually covers
-WEB_TOOLS = {"record_keyword_decisions"}
+# calls that may look things up on the web: the keyword step, to learn what a keyword usually covers, and the
+# job finder (ro/job_search.py). Value: the Claude Code tools it gets and the API's web-search budget.
+WEB_TOOLS = {"record_keyword_decisions": (("WebSearch",), 5), "record_jobs": (("WebSearch", "WebFetch"), 15)}
 WEB_MAX_USES = 5
 _DYNAMIC_SEARCH = re.compile(r"claude-(opus-(5|4-[678])|sonnet-(5|4-6))\b")
 
 
 def _call_tool(system: str, user: str, tool: dict, max_tokens: int) -> dict:
-    web = tool["name"] in WEB_TOOLS
+    cc_tools, max_uses = WEB_TOOLS.get(tool["name"], ((), 0))
     if config.active_engine() == "claude_code":
         from . import claude_code
         try:
-            return claude_code.run(system, user, tool["input_schema"], config.get_cc_model() or None,
-                                   tools=("WebSearch",) if web else ())
+            return claude_code.run(system, user, tool["input_schema"], config.get_cc_model() or None, tools=cc_tools)
         except claude_code.ClaudeCodeError as e:
             raise AIError(str(e))
-    if web:
-        return _call_api_with_search(system, user, tool, max_tokens)
+    if max_uses:
+        return _call_api_with_search(system, user, tool, max_tokens, max_uses)
     return _call_api(system, user, tool, max_tokens)
 
 
@@ -314,15 +314,15 @@ def _call_api(system: str, user: str, tool: dict, max_tokens: int) -> dict:
     raise AIError("The AI returned no structured result. Please try again.")
 
 
-def _call_api_with_search(system: str, user: str, tool: dict, max_tokens: int) -> dict:
+def _call_api_with_search(system: str, user: str, tool: dict, max_tokens: int, max_uses: int = WEB_MAX_USES) -> dict:
     """Web search, then the record tool. A forced tool_choice would skip the search, so this uses "auto",
     resumes paused turns, and nudges once if Claude stops without recording its answer."""
     model = config.get_model()
     search = {"type": "web_search_20260209" if _DYNAMIC_SEARCH.search(model) else "web_search_20250305",
-              "name": "web_search", "max_uses": WEB_MAX_USES}
+              "name": "web_search", "max_uses": max_uses}
     messages = [{"role": "user", "content": user + f"\n\nFinish by calling {tool['name']} exactly once."}]
     nudged = False
-    for _ in range(6):
+    for _ in range(6 + max_uses // 5):  # more searches can mean more paused turns
         msg = _api_errors(lambda: _client().messages.create(
             model=model, max_tokens=max(max_tokens, 16000), system=system,
             tools=[search, tool], tool_choice={"type": "auto"}, messages=messages,

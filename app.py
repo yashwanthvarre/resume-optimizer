@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ro import analyzer, claude_code, config, jd_fetch, jobs, paths, pdf_export, resume_io
+from ro import analyzer, claude_code, config, jd_fetch, job_search, jobs, paths, pdf_export, resume_io
 from ro.jobs import check, emit
 
 config.ensure_dirs()
@@ -470,12 +470,14 @@ def _jd_terms(s: dict) -> list[str]:
 
 
 def _file_names(s: dict, edits: dict[str, str]) -> dict:
-    """Stems like Yashwanth_Varre_Software_Engineer_Resume, plus document title/author for each file."""
+    """Stems like Yashwanth_Varre_Acme_Software_Engineer_Resume, plus document title/author for each file."""
     override = config.get_name_override()
     header = resume_io.contact_header(s["paragraphs"], edits)
     name = resume_io.name_words(override or (header[0] if header else ""))
-    role = resume_io.role_words((s.get("jd") or {}).get("role", ""))
-    stems = {k: resume_io.file_stem(name, role, kind) for k, kind in
+    jd = s.get("jd") or {}
+    role = resume_io.role_words(jd.get("role", ""))
+    company = resume_io.company_words(jd.get("company", ""))
+    stems = {k: resume_io.file_stem(name, role, kind, company) for k, kind in
              (("resume", "Resume"), ("cover", "Cover_Letter"), ("zip", "Application"))}
     titles = {k: v.replace("_", " ") for k, v in stems.items()}
     return {"stems": stems, "titles": titles, "author": " ".join(name), "name_found": bool(name),
@@ -656,6 +658,41 @@ async def upload_resume(file: UploadFile = File(...)):
     return _open_resume(dest, uploaded=True)
 
 
+class SessionIn(BaseModel):
+    session_id: str
+
+
+@app.post("/api/resume/clone")
+def clone_resume(body: SessionIn):
+    """A fresh session on the same resume file, for a job opened in its own tab: each tab keeps its own JD,
+    edits and cover letter, and nobody has to load the resume again."""
+    s = _session(body.session_id)
+    if not Path(s["path"]).exists():
+        _err(404, "The resume file is no longer there — load it again.")
+    d = _open_resume(Path(s["path"]), uploaded=s["uploaded"])
+    SESSIONS[d["session_id"]]["file_name"] = d["file_name"] = s["file_name"]
+    return d
+
+
+def _find_jobs_work(s: dict) -> dict:
+    text = "\n".join(p["text"] for p in s["paragraphs"] if p["text"].strip())
+    emit("profile", "running", f"Reading {s['file_name']}")
+    emit("profile", "done", f"{_plural(len(text.split()), 'word')} to match jobs against")
+    check()
+    try:
+        emit("search", "running", f"Searching job boards with {_engine_label()} (this can take a few minutes)")
+        found = job_search.find_jobs(text)
+    except analyzer.AIError as e:
+        _err(502, str(e))
+    emit("search", "done", found["profile"] or "Search finished")
+    n = len(found["jobs"])
+    emit("check", "done", f"{_plural(n, 'posting')} from the last 2 hours"
+         + (f", {len(found['dropped'])} left out" if found["dropped"] else ""),
+         detail=[f"{j['title']} at {j['company']} — {j['age_minutes']} min ago" for j in found["jobs"]]
+         + [f"Left out {d}" for d in found["dropped"]] or None)
+    return found
+
+
 # synchronous endpoints (no progress events) — kept for scripts and tests
 @app.post("/api/jd/fetch")
 def fetch_jd(body: UrlIn):
@@ -717,6 +754,14 @@ def job_justify(body: JustifyIn):
     plan = [("note", f"Read your input ({n})"), ("decide", "Research and place keywords"), ("check", "Honesty checks")]
     return _job_out(jobs.start("justify_keywords", f"Fill {_plural(n, 'keyword gap')}", plan,
                                lambda: _justify_work(s, body)))
+
+
+@app.post("/api/jobs/find_jobs")
+def job_find_jobs(body: SessionIn):
+    s = _session(body.session_id)
+    plan = [("profile", "Read your resume"), ("search", "Search for postings from the last 2 hours"),
+            ("check", "Check posting times and links")]
+    return _job_out(jobs.start("find_jobs", "Find fresh jobs", plan, lambda: _find_jobs_work(s)))
 
 
 @app.post("/api/jobs/export")

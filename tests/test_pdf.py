@@ -113,14 +113,14 @@ def test_formats_and_zip():
               "paragraphs": ["I build Python services on AWS for teams that care about reliability and clear APIs."]}
     out, out_dir, *_ = export("both")
     names = sorted(p.name for p in out_dir.iterdir())
-    assert names == ["Alex_Sample_Backend_Engineer_Resume.docx", "Alex_Sample_Backend_Engineer_Resume.pdf"], names
+    assert names == ["Alex_Sample_Globex_Backend_Engineer_Resume.docx", "Alex_Sample_Globex_Backend_Engineer_Resume.pdf"], names
     assert out["file_name"].endswith(".pdf") and [f["file_name"][-4:] for f in out["files"]] == [".pdf", "docx"]
     out, out_dir, *_ = export("docx")
     assert [p.suffix for p in out_dir.iterdir()] == [".docx"] and out["format"] == "docx"
     out, out_dir, *_ = export("pdf", cover_letter=letter)
-    assert out["cover"]["file_name"] == "Alex_Sample_Cover_Letter.pdf"
+    assert out["cover"]["file_name"] == "Alex_Sample_Globex_Backend_Engineer_Cover_Letter.pdf"
     with zipfile.ZipFile(appmod.DOWNLOADS[out["zip"]["download_url"].rsplit("/", 1)[1]]) as z:
-        assert sorted(z.namelist()) == ["Alex_Sample_Backend_Engineer_Resume.pdf", "Alex_Sample_Cover_Letter.pdf"]
+        assert sorted(z.namelist()) == ["Alex_Sample_Globex_Backend_Engineer_Cover_Letter.pdf", "Alex_Sample_Globex_Backend_Engineer_Resume.pdf"]
     out, out_dir, *_ = export("both", cover_letter=letter)
     with zipfile.ZipFile(appmod.DOWNLOADS[out["zip"]["download_url"].rsplit("/", 1)[1]]) as z:
         assert sorted(n[-4:] for n in z.namelist()) == [".pdf", ".pdf", "docx", "docx"], z.namelist()

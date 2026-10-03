@@ -341,17 +341,43 @@ def role_words(role: str | None) -> list[str]:
     return words[:6]
 
 
-def file_stem(name: list[str], role: list[str], kind: str) -> str:
-    """kind: "Resume", "Cover_Letter" or "Application". Yashwanth_Varre_Software_Engineer_Resume, or just
-    the kind when no name was found. Kept to MAX_STEM characters by dropping role words, then name words."""
+_LEGAL = {"inc", "incorporated", "llc", "llp", "lp", "ltd", "limited", "corp", "corporation", "co", "company",
+          "gmbh", "plc", "sa", "sas", "sarl", "ag", "nv", "bv", "pty", "pvt", "private", "srl", "spa", "oy", "ab",
+          "as", "kk", "kg", "se"}
+
+
+def company_words(company: str | None) -> list[str]:
+    """The employer as file-name words: no brackets or legal suffixes (Inc, LLC, Ltd, GmbH, S.A. …); max 3 words."""
+    if not company or company.strip().lower() in ("not specified", "unknown", "n/a", "na", "none"):
+        return []
+    c = re.sub(r"[(\[{].*?[)\]}]", " ", company)                       # (formerly Initech), [Remote]
+    c = re.split(r"\s[-–—|]\s|,", c, maxsplit=1)[0]                     # "Acme, Inc." / "Acme - Careers"
+    words = [re.sub(r"[^A-Za-z0-9]", "", _ascii(w.replace("&", " "))) for w in re.split(r"[\s/&]+", c)]
+    words = [w for w in words if w]
+    while len(words) > 1 and words[-1].lower() in _LEGAL:                # Acme Holdings Co Ltd -> Acme Holdings
+        words.pop()
+    if len(words) == 1 and words[0].lower() in _LEGAL and words[0].lower() not in ("co", "company"):
+        return []
+    return [_word_case(w, acronyms=True) for w in words][:3]
+
+
+def file_stem(name: list[str], role: list[str], kind: str, company: list[str] | None = None) -> str:
+    """kind: "Resume", "Cover_Letter" or "Application". First_Last_Company_Role_Kind, e.g.
+    Yashwanth_Varre_Acme_Software_Engineer_Resume; company and/or role are left out when unknown.
+    Just the kind when no name was found. Kept to MAX_STEM characters by dropping role words, then company
+    words (down to one), then middle names, then the last company word."""
     if not name:
         return kind
-    name, role = list(name), list(role if kind != "Cover_Letter" else [])
-    stem = lambda: re.sub(r"_+", "_", "_".join(name + role + [kind])).strip("_")
+    name, role, company = list(name), list(role or []), list(company or [])
+    stem = lambda: re.sub(r"_+", "_", "_".join(name + company + role + [kind])).strip("_")
     while len(stem()) > MAX_STEM and role:
         role.pop()
+    while len(stem()) > MAX_STEM and len(company) > 1:
+        company.pop()
     while len(stem()) > MAX_STEM and len(name) > 1:
         name.pop(-2 if len(name) > 2 else -1)                            # drop middle names first
+    while len(stem()) > MAX_STEM and company:
+        company.pop()
     return stem()[:MAX_STEM].rstrip("_")
 
 
