@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 
 from ro import analyzer, claude_code, config, jd_fetch, job_search, jobs, paths, pdf_export, resume_io
@@ -832,15 +833,30 @@ def download(token: str):
     return FileResponse(p, filename=p.name, media_type=MEDIA.get(p.suffix.lower(), "application/octet-stream"))
 
 
-class _FreshStatic(StaticFiles):
-    """Browsers revalidate the UI files on every load, so an updated app never runs stale JS."""
-    def file_response(self, *args, **kwargs):
-        resp = super().file_response(*args, **kwargs)
-        resp.headers["Cache-Control"] = "no-cache"
+UI_DIR = Path(__file__).parent / "frontend" / "dist"
+
+
+class _UiFiles(StaticFiles):
+    """The React build (frontend/dist). Hashed files under assets/ are cached for good; everything else, index.html
+    included, is revalidated on every load so an updated app never runs stale JS. Unknown paths get index.html."""
+    async def get_response(self, path: str, scope):
+        try:
+            resp = await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code != 404 or path.startswith("api/"):
+                raise
+            resp = await super().get_response("index.html", scope)
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable" if path.startswith("assets/") else "no-cache"
         return resp
 
 
-app.mount("/", _FreshStatic(directory=Path(__file__).parent / "static", html=True), name="static")
+if (UI_DIR / "index.html").exists():
+    app.mount("/", _UiFiles(directory=UI_DIR, html=True), name="ui")
+else:
+    @app.get("/{path:path}", include_in_schema=False)
+    def ui_missing(path: str):
+        return HTMLResponse("<h1>Resume Optimizer</h1><p>The web UI hasn't been built yet. Run <code>./run.sh</code> "
+                            "(or <code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code>), then reload.</p>", 503)
 
 
 def _free_port(start: int) -> int:
