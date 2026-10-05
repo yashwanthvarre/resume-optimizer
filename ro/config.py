@@ -90,6 +90,25 @@ def get_bold_keywords() -> bool:
     return bool(load_config().get("bold_keywords", True))
 
 
+# Seeded as the default resume the first time config is read, if it's on this computer. Relative to the home
+# folder, so a test run with a temporary HOME never picks it up.
+SEED_DEFAULT_RESUME = Path("Documents") / "Resume" / "FullTime" / "Yashwanth_Varre_Software_Engineer_Resume.docx"
+
+
+def get_default_resume_path() -> str:
+    """The resume loaded automatically on start ("" = none: start with an empty drop zone).
+
+    A saved "" means the user cleared it, so the seed is only used while the key has never been set."""
+    cfg = load_config()
+    if "default_resume_path" in cfg:
+        return cfg["default_resume_path"] or ""
+    seed = Path.home() / SEED_DEFAULT_RESUME
+    if seed.is_file():
+        save_config(default_resume_path=str(seed.resolve()))
+        return str(seed.resolve())
+    return ""
+
+
 def get_cc_model() -> str:
     return load_config().get("cc_model", "sonnet")
 

@@ -43,6 +43,7 @@ export interface AppState {
   resume: Resume | null;
   resumePath: string;
   resumeStatus: Status;
+  resumeIsDefault: boolean; // the loaded resume is the one set as default in Settings
 
   // the job
   jdUrl: string;
@@ -126,7 +127,7 @@ export const emptyLetter: Letter = { greeting: "", closing: "", signature: "", p
 
 export const initialState: AppState = {
   cfg: null, view: "setup", settingsOpen: false,
-  resume: null, resumePath: "", resumeStatus: st(),
+  resume: null, resumePath: "", resumeStatus: st(), resumeIsDefault: false,
   jdUrl: "", jdText: "", jdMeta: {}, jdBox: false, jdTitle: "", jdMethod: "", jdStatus: st(), fetching: false, fetchRetry: false,
   finderTab: false, findRunning: false, findJob: null, hasSearched: false,
   findStatus: st("Load your resume and the search starts by itself."), found: null, foundAt: 0, opened: [], searchedFor: "",

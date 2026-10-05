@@ -12,7 +12,7 @@ type Engine = "claude_code" | "api";
 export function SettingsDialog() {
   const { settingsOpen, cfg, resume } = useApp();
   const qc = useQueryClient();
-  const [f, setF] = useState({ engine: "claude_code" as Engine, apiKey: "", model: "", ccModel: "", outDir: "", fileFormat: "pdf", nameOverride: "", docFont: "EB Garamond", boldKw: true });
+  const [f, setF] = useState({ engine: "claude_code" as Engine, apiKey: "", model: "", ccModel: "", outDir: "", defaultResume: "", fileFormat: "pdf", nameOverride: "", docFont: "EB Garamond", boldKw: true });
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -22,7 +22,7 @@ export function SettingsDialog() {
     setErr("");
     setF({
       engine: (cfg.engine === "auto" ? cfg.active_engine : cfg.engine) as Engine, apiKey: "", model: cfg.model || "", ccModel: cfg.cc_model ?? "sonnet",
-      outDir: cfg.output_dir || "", fileFormat: cfg.file_format || "pdf", nameOverride: cfg.name_override || "",
+      outDir: cfg.output_dir || "", defaultResume: cfg.default_resume_path || "", fileFormat: cfg.file_format || "pdf", nameOverride: cfg.name_override || "",
       docFont: cfg.doc_font || "EB Garamond", boldKw: cfg.bold_keywords !== false,
     });
   }, [settingsOpen, cfg]);
@@ -33,16 +33,18 @@ export function SettingsDialog() {
     setSaving(true);
     try {
       const next = await saveSettings({ engine: f.engine, api_key: f.apiKey, model: f.model, cc_model: f.ccModel, output_dir: f.outDir,
-        doc_font: f.docFont, bold_keywords: f.boldKw, file_format: f.fileFormat, name_override: f.nameOverride });
-      set({ cfg: next, settingsOpen: false });
+        default_resume_path: f.defaultResume, doc_font: f.docFont, bold_keywords: f.boldKw, file_format: f.fileFormat, name_override: f.nameOverride });
+      set((s) => ({ cfg: next, settingsOpen: false, resumeIsDefault: !!next.default_resume_path && s.resume?.path === next.default_resume_path }));
       void qc.invalidateQueries({ queryKey: ["fileNames"] });
       toast("Settings saved", "ok");
     } catch (x) { setErr(errMsg(x)); }
     finally { setSaving(false); }
   };
-  const browse = async () => {
-    try { const { path } = await pickPath("folder"); if (path) setF((v) => ({ ...v, outDir: path })); }
-    catch (x) { setErr(errMsg(x)); }
+  const browse = async (kind: "folder" | "file") => {
+    try {
+      const { path } = await pickPath(kind);
+      if (path) setF((v) => (kind === "folder" ? { ...v, outDir: path } : { ...v, defaultResume: path }));
+    } catch (x) { setErr(errMsg(x)); }
   };
   const radio = "my-2 flex cursor-pointer items-start gap-2 text-sm [&_input]:mt-1 [&_input]:accent-accent";
 
@@ -87,11 +89,20 @@ export function SettingsDialog() {
                     )}
                   </AnimatePresence>
 
+                  <label className="label" htmlFor="defaultResumeIn">Default resume</label>
+                  <div className="flex items-center gap-2">
+                    <input id="defaultResumeIn" className="field" type="text" spellCheck={false} placeholder="None: start with an empty drop zone"
+                      value={f.defaultResume} onChange={(e) => setF({ ...f, defaultResume: e.target.value })} />
+                    <button type="button" className="btn secondary" id="defaultResumeBrowse" onClick={() => void browse("file")}>Browse…</button>
+                    <button type="button" className="btn ghost" id="defaultResumeClear" disabled={!f.defaultResume} onClick={() => setF({ ...f, defaultResume: "" })}>Clear</button>
+                  </div>
+                  <div className="hint">Loaded every time the app starts, and the job search begins by itself. Clear it to choose a resume each time.</div>
+
                   <label className="label" htmlFor="outDir">Save downloads to</label>
                   <div className="flex items-center gap-2">
                     <input id="outDir" className="field" type="text" spellCheck={false} placeholder={resume ? resume.default_output_dir : "Next to your resume"}
                       value={f.outDir} onChange={(e) => setF({ ...f, outDir: e.target.value })} />
-                    <button type="button" className="btn secondary" id="outBrowse" onClick={() => void browse()}>Browse…</button>
+                    <button type="button" className="btn secondary" id="outBrowse" onClick={() => void browse("folder")}>Browse…</button>
                   </div>
                   <div className="hint">A copy of each file you download is also saved here.</div>
 

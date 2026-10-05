@@ -93,6 +93,7 @@ class SettingsIn(BaseModel):
     bold_keywords: Optional[bool] = None
     file_format: Optional[str] = None    # "pdf", "docx" or "both"
     name_override: Optional[str] = None  # name for file names; "" = use the name on the resume
+    default_resume_path: Optional[str] = None  # loaded on start; "" = off
 
 
 class UrlIn(BaseModel):
@@ -582,7 +583,8 @@ def _export_work(s: dict, out_dir: Path, body: ExportIn) -> dict:
 def get_config():
     cfg = config.load_config()
     cc_path = claude_code.find_claude()
-    return {"last_resume_path": cfg.get("last_resume_path", ""), "output_dir": cfg.get("output_dir", ""),
+    return {"last_resume_path": cfg.get("last_resume_path", ""), "default_resume_path": config.get_default_resume_path(),
+            "output_dir": cfg.get("output_dir", ""),
             "has_api_key": config.has_api_key(), "model": config.get_model(),
             "engine": config.get_engine_pref(), "active_engine": config.active_engine(),
             "claude_code_path": cc_path or "", "cc_model": config.get_cc_model(),
@@ -623,6 +625,16 @@ def save_settings(body: SettingsIn):
         config.save_config(file_format=body.file_format)
     if body.bold_keywords is not None:
         config.save_config(bold_keywords=body.bold_keywords)
+    if body.default_resume_path is not None:
+        raw = body.default_resume_path.strip()
+        if not raw:
+            config.save_config(default_resume_path="")  # kept as "" so the seed doesn't come back
+        elif raw != config.get_default_resume_path():  # unchanged: saving other settings needn't re-check the file
+            try:
+                resolved = paths.resolve_user_path(raw, must_exist=True)
+            except paths.PathError as e:
+                _err(400, f"Can't use that as your default resume: {e}")
+            config.save_config(default_resume_path=str(resolved))
     if body.output_dir is not None:
         out = body.output_dir.strip()
         if out:

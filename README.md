@@ -3,6 +3,11 @@
 Load your resume, pick one of the fresh jobs Claude finds for it (or paste your own job link), and get a tailored `.docx`. You approve every change first.
 
 1. **Resume:** drop the file in, or type or paste its path on the computer you're using, or click **Browse…** to use your system's file picker. `.docx`, `.pdf` and `.txt` are supported.
+   - **Default resume:** set one and it loads by itself every time the app starts, so the job search begins with no clicks. The card shows it with a **Default** tag.
+     - **Use a different resume** brings back the drop zone, path box and **Browse…**. A resume loaded that way is used for this session only: **Back to default** returns to yours, and **Make this my default** makes it the new default.
+     - Change it in **Settings → Default resume** (type a path or click **Browse…**). **Clear** turns auto-load off, so the app starts with an empty drop zone again.
+     - If the file has moved or can't be read, the card shows why and you can load a resume as usual.
+     - Tabs opened from the job list use the resume of the tab they came from, default or not.
 2. **Find jobs:** as soon as the resume is loaded, Claude starts searching for postings that fit it and went up in the last 2 hours (see [Find fresh jobs](#find-fresh-jobs) below). Pick one and it opens in its own tab, ready to tailor.
 3. **Job description:** to tailor for a job you found yourself, paste or type a link. The app starts reading the posting straight away: on paste, a moment after you stop typing, or when you leave the field. Changing the link cancels the fetch in progress, and **Retry** appears if a fetch fails.
    - It has built-in support for Workday, Greenhouse, Lever and LinkedIn, and for any site that publishes standard job data.
@@ -131,7 +136,7 @@ Paths are resolved on the machine the app runs on, so the same app works anywher
 - `%USERPROFILE%\Documents\Resume.docx` and `$HOME/Resume.docx`
 - `file:///Users/varre/Resume.docx`
 
-The last path you used, your output folder, API key and model are stored per user in `~/.resume-optimizer/`, which is `C:\Users\<you>\.resume-optimizer\` on Windows.
+The last path you used, your default resume, output folder, API key and model are stored per user in `~/.resume-optimizer/`, which is `C:\Users\<you>\.resume-optimizer\` on Windows.
 
 ## Honesty guardrails
 

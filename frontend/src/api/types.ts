@@ -2,6 +2,7 @@
 
 export interface Config {
   last_resume_path: string;
+  default_resume_path: string; // loaded on start; "" = off
   output_dir: string;
   has_api_key: boolean;
   model: string;

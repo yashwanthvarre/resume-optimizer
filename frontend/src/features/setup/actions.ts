@@ -1,5 +1,5 @@
 // Setup flows: loading the resume, fetching the posting, the job finder, and a tab opened from the job list.
-import { api, getConfig } from "../../api/client";
+import { api, getConfig, saveSettings } from "../../api/client";
 import type { FindResult, JdMeta, Resume } from "../../api/types";
 import { cancelJob, errMsg, isCancelled, jobProgress, logLocal, runJob } from "../../lib/jobs";
 import { get, set, st } from "../../store/app";
@@ -17,12 +17,14 @@ export async function init() {
   if (!ready) setTimeout(() => set({ settingsOpen: true }), 300);
   const q = new URLSearchParams(location.search);
   if (q.get("job")) await openFromFinder(q);
+  else if (cfg.default_resume_path) await loadResumePath(cfg.default_resume_path);
 }
 
 // ------------------------------------------------------------------ resume
 function onResumeLoaded(d: Resume) {
   set((s) => ({
     resume: d,
+    resumeIsDefault: !!s.cfg?.default_resume_path && d.path === s.cfg.default_resume_path,
     resumePath: d.path.includes(".resume-optimizer") ? s.resumePath : d.path,
     resumeStatus: st(`${d.count} paragraphs found. ${d.keeps_formatting ? "Your formatting is kept when you download." : "PDF/TXT layout can't be kept, so you'll get a clean new .docx."}`, "ok"),
   }));
@@ -35,14 +37,32 @@ function onResumeLoaded(d: Resume) {
 }
 
 function onResumeFailed(msg: string) {
-  set({ resume: null, resumeStatus: st(msg, "err") });
+  set({ resume: null, resumeIsDefault: false, resumeStatus: st(msg, "err") });
   logLocal("Load resume", [{ step: "read", label: "Read your resume", message: msg, status: "error" }], "error", msg);
 }
 
-export async function loadResumePath() {
+/** Loads the path in the box, or `path` (the default resume) without touching what's typed there. */
+export async function loadResumePath(path = get().resumePath) {
   set({ resumeStatus: st("Reading resume…", "info", true) });
-  try { onResumeLoaded(await api<Resume>("/api/resume/load", { path: get().resumePath })); }
+  try { onResumeLoaded(await api<Resume>("/api/resume/load", { path })); }
   catch (e) { onResumeFailed(errMsg(e)); }
+}
+
+/** Back to default: swaps the session-only resume for the one set in Settings. */
+export function loadDefaultResume() {
+  const path = get().cfg?.default_resume_path;
+  if (path) void loadResumePath(path);
+}
+
+/** Make this my default: the loaded resume is loaded on every start from now on. */
+export async function makeDefaultResume() {
+  const r = get().resume;
+  if (!r) return;
+  try {
+    const cfg = await saveSettings({ default_resume_path: r.path });
+    set({ cfg, resumeIsDefault: true });
+    toast(`${r.file_name} is now your default resume`, "ok");
+  } catch (e) { toast(errMsg(e), "err"); }
 }
 
 export async function browseResume() {
