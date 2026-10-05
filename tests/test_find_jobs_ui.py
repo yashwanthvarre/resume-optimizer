@@ -29,7 +29,7 @@ try:
         pg = ctx.new_page()
         errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.goto(URL); pg.wait_for_timeout(400)
-        if pg.locator("#settingsDlg[open]").count(): pg.keyboard.press("Escape")
+        if pg.locator("#settingsDlg").count(): pg.keyboard.press("Escape")
 
         # 1) the finder is a required step: shown, waiting for the resume, no button to start it by hand
         assert pg.is_visible("#findCard") and pg.is_hidden("#findJobsBtn")
@@ -63,12 +63,12 @@ try:
         tab = new.value
         tab.on("pageerror", lambda e: errs.append(str(e)))
         tab.wait_for_load_state()
-        if tab.locator("#settingsDlg[open]").count(): tab.keyboard.press("Escape")
+        if tab.locator("#settingsDlg").count(): tab.keyboard.press("Escape")
         tab.wait_for_selector("#reviewView:not([hidden])", timeout=15000)
         assert "Globex" in tab.title() and tab.url == URL, (tab.title(), tab.url)
         assert tab.is_hidden("#findCard") and tab.input_value("#jdUrl") == "https://jobs.example.test/globex"
-        assert tab.evaluate("searchedFor") == "" and tab.inner_text("#jdStepNo") == "2"  # no search in a job's tab
-        sid_main = pg.evaluate("state.resume.session_id"); sid_tab = tab.evaluate("state.resume.session_id")
+        assert tab.evaluate("__ro.state().searchedFor") == "" and tab.inner_text("#jdStepNo") == "2"  # no search in a job's tab
+        sid_main = pg.evaluate("__ro.state().resume.session_id"); sid_tab = tab.evaluate("__ro.state().resume.session_id")
         assert sid_main != sid_tab
         assert "Opened in a new tab" in pg.inner_text('[data-open="0"]')
 

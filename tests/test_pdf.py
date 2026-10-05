@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 import app as appmod
 from ro import analyzer, pdf_export as P, resume_io as R
 sys.path.insert(0, str(Path(__file__).parent))
-from test_e2e_data import JD, CH, COVER
+from test_e2e_data import JD, CH, COVER, JD_TEXT
 
 analyzer._call_tool = lambda s, u, tool, mt: {"record_jd": JD, "record_changes": CH, "record_cover_letter": COVER}[tool["name"]]
 SRC = (Path(__file__).parent / "sample_resume.docx").resolve()
@@ -20,7 +20,7 @@ HAVE_LO = bool(P.find_soffice())
 
 def session():
     sid = c.post("/api/resume/load", json={"path": str(SRC)}).json()["session_id"]
-    res = c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()
+    res = c.post("/api/analyze", json={"session_id": sid, "jd_text": JD_TEXT}).json()
     accepted = [{"target_id": x["target_id"], "new_text": x["new_text"]} for x in res["changes"]]
     return sid, accepted
 

@@ -9,7 +9,7 @@ from docx import Document
 import app as appmod
 from ro import analyzer, jobs, resume_io
 sys.path.insert(0, str(Path(__file__).parent))
-from test_e2e_data import JD, CH, COVER
+from test_e2e_data import JD, CH, COVER, JD_TEXT
 
 CANNED = {"record_jd": JD, "record_changes": CH, "record_cover_letter": COVER}
 analyzer._call_tool = lambda s, u, tool, mt: CANNED[tool["name"]]
@@ -59,7 +59,7 @@ print("ok: cover letter validation")
 
 # ---- 2. load + analyze as a job: events arrive in plan order and end with the result
 sid = c.post("/api/resume/load", json={"path": str(src)}).json()["session_id"]
-r = c.post("/api/jobs/analyze", json={"session_id": sid, "jd_text": "x" * 200})
+r = c.post("/api/jobs/analyze", json={"session_id": sid, "jd_text": JD_TEXT})
 assert r.status_code == 200, r.text
 job = r.json(); assert [p["step"] for p in job["plan"]] == ["resume", "analyze_jd", "propose", "validate"]
 evs, end = sse(job["job_id"])
@@ -134,7 +134,7 @@ def boom(s, u, tool, mt):
         raise analyzer.AIError("Your Claude plan's usage limit was reached.")
     return CANNED[tool["name"]]
 analyzer._call_tool = boom
-evs, end = sse(c.post("/api/jobs/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()["job_id"])
+evs, end = sse(c.post("/api/jobs/analyze", json={"session_id": sid, "jd_text": JD_TEXT}).json()["job_id"])
 assert end["status"] == "error" and "usage limit" in end["error"], end
 last = evs[-1]
 assert last["step"] == "propose" and last["status"] == "error" and "usage limit" in last["message"], last
@@ -148,7 +148,7 @@ def slow(s, u, tool, mt):
     gate.wait(5)
     return CANNED[tool["name"]]
 analyzer._call_tool = slow
-jid = c.post("/api/jobs/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()["job_id"]
+jid = c.post("/api/jobs/analyze", json={"session_id": sid, "jd_text": JD_TEXT}).json()["job_id"]
 assert c.post(f"/api/jobs/{jid}/cancel").json()["ok"]
 gate.set()
 evs, end = sse(jid)

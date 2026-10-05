@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import app as appmod
 from ro import analyzer
 sys.path.insert(0, str(Path(__file__).parent))
-from test_e2e_data import JD, CH, COVER, keyword_decisions
+from test_e2e_data import JD, CH, COVER, JD_TEXT, keyword_decisions
 
 prompts, calls, OVERRIDE = {}, [], []
 def fake(s, u, tool, mt):
@@ -21,7 +21,7 @@ analyzer._call_tool = fake
 c = TestClient(appmod.app)
 src = (Path(__file__).parent / "sample_resume.docx").resolve()
 sid = c.post("/api/resume/load", json={"path": str(src)}).json()["session_id"]
-res = c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()
+res = c.post("/api/analyze", json={"session_id": sid, "jd_text": JD_TEXT}).json()
 accepted = [{"target_id": x["target_id"], "new_text": x["new_text"]} for x in res["changes"]]
 p7_edit = next(a["new_text"] for a in accepted if a["target_id"] == "p7")
 K8S = "At Acme I ran our staging and production services on Kubernetes across 3 clusters with Helm charts."

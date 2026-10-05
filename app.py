@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 
 from ro import analyzer, claude_code, config, jd_fetch, job_search, jobs, paths, pdf_export, resume_io
@@ -92,6 +93,7 @@ class SettingsIn(BaseModel):
     bold_keywords: Optional[bool] = None
     file_format: Optional[str] = None    # "pdf", "docx" or "both"
     name_override: Optional[str] = None  # name for file names; "" = use the name on the resume
+    default_resume_path: Optional[str] = None  # loaded on start; "" = off
 
 
 class UrlIn(BaseModel):
@@ -172,12 +174,15 @@ def _analyze_work(s: dict, jd_text: str) -> dict:
     try:
         emit("analyze_jd", "running", f"Sending the job description to {engine}")
         jd = analyzer.analyze_jd(jd_text)
+        not_in_jd = jd.pop("dropped_keywords", [])  # never shown to later prompts
         kws = jd.get("keywords", [])
         req = sum(1 for k in kws if k.get("importance") == "required")
         emit("analyze_jd", "done",
-             f"Extracted {_plural(len(kws), 'keyword')} ({req} required) and {_plural(len(jd.get('patterns', [])), 'theme')}",
+             f"Extracted {_plural(len(kws), 'keyword')} ({req} required) and {_plural(len(jd.get('patterns', [])), 'theme')}"
+             + (f"; dropped {_plural(len(not_in_jd), 'keyword')} not in the JD" if not_in_jd else ""),
              detail=[f"{k['term']} — {k.get('importance', '')}" for k in kws]
-             + [f"Theme: {t}" for t in jd.get("patterns", [])])
+             + [f"Theme: {t}" for t in jd.get("patterns", [])]
+             + [f"Dropped (not in the JD): {t}" for t in not_in_jd])
         check()
         emit("propose", "running", f"Comparing {_plural(len(paras), 'paragraph')} against the job and drafting edits")
         raw = analyzer.propose_changes(jd, s["paragraphs"])
@@ -188,6 +193,7 @@ def _analyze_work(s: dict, jd_text: str) -> dict:
     check()
     emit("validate", "running", "Checking every edit against your original resume")
     result = analyzer.validate_changes(raw, s["paragraphs"])
+    analyzer.tag_changes(result["changes"], jd)
     kept, dropped = result["changes"], result["dropped"]
     flagged = [f"{c['target_id']}: {w}" for c in kept for w in c["warnings"]]
     msg = f"{_plural(len(kept), 'edit')} kept"
@@ -196,6 +202,8 @@ def _analyze_work(s: dict, jd_text: str) -> dict:
     if flagged:
         msg += f", {len({f.split(':')[0] for f in flagged})} flagged for you to verify"
     emit("validate", "done", msg, detail=[f"Dropped {d}" for d in dropped] + [f"Flagged {f}" for f in flagged] or None)
+    terms = {k["term"].lower() for k in jd.get("keywords", [])}
+    result["keyword_gaps"] = [g for g in result["keyword_gaps"] if g["term"].lower() in terms]  # verified keywords only
     s["jd"] = jd
     return {"jd": jd, **result}
 
@@ -575,7 +583,8 @@ def _export_work(s: dict, out_dir: Path, body: ExportIn) -> dict:
 def get_config():
     cfg = config.load_config()
     cc_path = claude_code.find_claude()
-    return {"last_resume_path": cfg.get("last_resume_path", ""), "output_dir": cfg.get("output_dir", ""),
+    return {"last_resume_path": cfg.get("last_resume_path", ""), "default_resume_path": config.get_default_resume_path(),
+            "output_dir": cfg.get("output_dir", ""),
             "has_api_key": config.has_api_key(), "model": config.get_model(),
             "engine": config.get_engine_pref(), "active_engine": config.active_engine(),
             "claude_code_path": cc_path or "", "cc_model": config.get_cc_model(),
@@ -616,6 +625,16 @@ def save_settings(body: SettingsIn):
         config.save_config(file_format=body.file_format)
     if body.bold_keywords is not None:
         config.save_config(bold_keywords=body.bold_keywords)
+    if body.default_resume_path is not None:
+        raw = body.default_resume_path.strip()
+        if not raw:
+            config.save_config(default_resume_path="")  # kept as "" so the seed doesn't come back
+        elif raw != config.get_default_resume_path():  # unchanged: saving other settings needn't re-check the file
+            try:
+                resolved = paths.resolve_user_path(raw, must_exist=True)
+            except paths.PathError as e:
+                _err(400, f"Can't use that as your default resume: {e}")
+            config.save_config(default_resume_path=str(resolved))
     if body.output_dir is not None:
         out = body.output_dir.strip()
         if out:
@@ -832,15 +851,30 @@ def download(token: str):
     return FileResponse(p, filename=p.name, media_type=MEDIA.get(p.suffix.lower(), "application/octet-stream"))
 
 
-class _FreshStatic(StaticFiles):
-    """Browsers revalidate the UI files on every load, so an updated app never runs stale JS."""
-    def file_response(self, *args, **kwargs):
-        resp = super().file_response(*args, **kwargs)
-        resp.headers["Cache-Control"] = "no-cache"
+UI_DIR = Path(__file__).parent / "frontend" / "dist"
+
+
+class _UiFiles(StaticFiles):
+    """The React build (frontend/dist). Hashed files under assets/ are cached for good; everything else, index.html
+    included, is revalidated on every load so an updated app never runs stale JS. Unknown paths get index.html."""
+    async def get_response(self, path: str, scope):
+        try:
+            resp = await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code != 404 or path.startswith("api/"):
+                raise
+            resp = await super().get_response("index.html", scope)
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable" if path.startswith("assets/") else "no-cache"
         return resp
 
 
-app.mount("/", _FreshStatic(directory=Path(__file__).parent / "static", html=True), name="static")
+if (UI_DIR / "index.html").exists():
+    app.mount("/", _UiFiles(directory=UI_DIR, html=True), name="ui")
+else:
+    @app.get("/{path:path}", include_in_schema=False)
+    def ui_missing(path: str):
+        return HTMLResponse("<h1>Resume Optimizer</h1><p>The web UI hasn't been built yet. Run <code>./run.sh</code> "
+                            "(or <code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code>), then reload.</p>", 503)
 
 
 def _free_port(start: int) -> int:

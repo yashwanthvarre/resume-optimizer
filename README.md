@@ -3,6 +3,11 @@
 Load your resume, pick one of the fresh jobs Claude finds for it (or paste your own job link), and get a tailored `.docx`. You approve every change first.
 
 1. **Resume:** drop the file in, or type or paste its path on the computer you're using, or click **Browse…** to use your system's file picker. `.docx`, `.pdf` and `.txt` are supported.
+   - **Default resume:** set one and it loads by itself every time the app starts, so the job search begins with no clicks. The card shows it with a **Default** tag.
+     - **Use a different resume** brings back the drop zone, path box and **Browse…**. A resume loaded that way is used for this session only: **Back to default** returns to yours, and **Make this my default** makes it the new default.
+     - Change it in **Settings → Default resume** (type a path or click **Browse…**). **Clear** turns auto-load off, so the app starts with an empty drop zone again.
+     - If the file has moved or can't be read, the card shows why and you can load a resume as usual.
+     - Tabs opened from the job list use the resume of the tab they came from, default or not.
 2. **Find jobs:** as soon as the resume is loaded, Claude starts searching for postings that fit it and went up in the last 2 hours (see [Find fresh jobs](#find-fresh-jobs) below). Pick one and it opens in its own tab, ready to tailor.
 3. **Job description:** to tailor for a job you found yourself, paste or type a link. The app starts reading the posting straight away: on paste, a moment after you stop typing, or when you leave the field. Changing the link cancels the fetch in progress, and **Retry** appears if a fetch fails.
    - It has built-in support for Workday, Greenhouse, Lever and LinkedIn, and for any site that publishes standard job data.
@@ -63,7 +68,7 @@ Load your resume, pick one of the fresh jobs Claude finds for it (or paste your 
 
 ## Setup (any computer)
 
-You need **Python 3.10+** ([python.org](https://www.python.org/downloads/)) plus one of the following:
+You need **Python 3.10+** ([python.org](https://www.python.org/downloads/)) and **Node.js 20+** ([nodejs.org](https://nodejs.org), used once to build the web UI), plus one of the following:
 
 - **Your Claude subscription (recommended, no API key needed):**
   1. Install **Claude Code**. The steps are at [claude.com/product/claude-code](https://claude.com/product/claude-code). On Mac/Linux:
@@ -79,7 +84,7 @@ You need **Python 3.10+** ([python.org](https://www.python.org/downloads/)) plus
 | Linux | `./run.sh` |
 | Windows | Double-click `run.bat` |
 
-The first run creates a private `.venv` and installs dependencies. After that the app opens in your browser at `http://127.0.0.1:8765`.
+The first run creates a private `.venv`, installs dependencies and builds the web UI into `frontend/dist`. After that the app opens in your browser at `http://127.0.0.1:8765`. `run.sh` rebuilds the UI when its source changes; on Windows, delete `frontend\dist` to force a rebuild.
 
 Manual alternative:
 
@@ -87,8 +92,32 @@ Manual alternative:
 python -m venv .venv
 # macOS/Linux: source .venv/bin/activate    Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+(cd frontend && npm install && npm run build)
 python app.py            # options: --port 9000  --no-browser
 ```
+
+## Developing the UI
+
+The frontend is React 19 + TypeScript, built with Vite, in `frontend/`. Animations use [Motion](https://motion.dev) (`motion/react`), styling is Tailwind CSS 4 with the app's palette as theme tokens (`frontend/src/styles.css`), app state lives in a small Zustand store, and TanStack Query caches the file-name preview. Settings is a Radix dialog.
+
+```bash
+python app.py --no-browser          # or: python tests/mock_server.py 8765  (canned AI output, no key needed)
+cd frontend && npm run dev          # http://localhost:5173, hot reload; /api is proxied to :8765
+```
+
+Point the proxy elsewhere with `RO_BACKEND=http://127.0.0.1:9000 npm run dev`. `npm run typecheck` runs TypeScript and `npm run build` writes `frontend/dist`, which FastAPI serves at `/` (hashed assets are cached for a year, `index.html` is always revalidated).
+
+```
+frontend/src/
+  api/          typed fetch client + response types
+  lib/          background jobs (SSE with polling fallback), keyword matching, word diff
+  store/        Zustand app state, derived helpers, toasts
+  ui/           shared pieces: segmented control, side sheet, collapse, status line, toasts
+  features/     setup (resume, job finder, job, analyze), review (page, edit popover), keywords
+                (panel + add missing keywords), coverLetter, settings, activity, topbar
+```
+
+All motion respects the system's reduce-motion setting.
 
 **Optional:** to read job sites that need JavaScript and have no public API, install a headless browser:
 
@@ -107,7 +136,7 @@ Paths are resolved on the machine the app runs on, so the same app works anywher
 - `%USERPROFILE%\Documents\Resume.docx` and `$HOME/Resume.docx`
 - `file:///Users/varre/Resume.docx`
 
-The last path you used, your output folder, API key and model are stored per user in `~/.resume-optimizer/`, which is `C:\Users\<you>\.resume-optimizer\` on Windows.
+The last path you used, your default resume, output folder, API key and model are stored per user in `~/.resume-optimizer/`, which is `C:\Users\<you>\.resume-optimizer\` on Windows.
 
 ## Honesty guardrails
 
@@ -141,11 +170,11 @@ ro/resume_io.py     resume parsing + formatting-preserving .docx export
 ro/analyzer.py      Claude prompts, structured output, guardrails (resume edits + cover letter)
 ro/jobs.py          background jobs + live progress events (streamed to the UI over SSE)
 ro/claude_code.py   runs Claude via the Claude Code CLI (uses your subscription)
-static/             UI (HTML/CSS/JS, no build step)
+frontend/           web UI (React + TypeScript + Vite; see Developing the UI)
 tests/              offline tests; tests/mock_server.py runs the UI with canned AI output
 ```
 
-Run the tests with `python tests/test_e2e.py && python tests/test_jobs_cover.py && python tests/test_justify.py && python tests/test_parse_layout.py && python tests/test_typography.py && python tests/test_pdf.py && python tests/test_file_names.py && python tests/test_jd_fetch.py && python tests/test_fuzz_docx_edit.py && python tests/test_claude_code.py && python tests/test_web_search.py`. `python tests/test_autofetch_ui.py` checks auto-fetch in a real browser against the mock server; it needs Playwright and skips without it. With `tests/mock_server.py`, links on a `.test` host (e.g. `https://jobs.example.test/1`) return a canned posting.
+Run the tests with `python tests/test_e2e.py && python tests/test_jobs_cover.py && python tests/test_justify.py && python tests/test_parse_layout.py && python tests/test_typography.py && python tests/test_pdf.py && python tests/test_file_names.py && python tests/test_jd_fetch.py && python tests/test_fuzz_docx_edit.py && python tests/test_claude_code.py && python tests/test_web_search.py`. `python tests/test_autofetch_ui.py` and `python tests/test_find_jobs_ui.py` drive the built UI in a real browser against the mock server (build it first); they need Playwright and skip without it. They read app state through `window.__ro.state()`. With `tests/mock_server.py`, links on a `.test` host (e.g. `https://jobs.example.test/1`) return a canned posting.
 
 `python tests/mock_server.py` runs the UI with canned AI output. Set `MOCK_DELAY=3` to slow the fake AI calls down so the progress UI is easier to watch.
 

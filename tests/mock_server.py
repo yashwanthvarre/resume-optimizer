@@ -22,6 +22,7 @@ def fake(s, u, tool, mt):
         return keyword_decisions(u)
     return CANNED[tool["name"]]
 analyzer._call_tool = fake
+analyzer.ground_keywords = lambda jd, text: jd  # UI tests paste arbitrary JD text; keep the canned keywords
 from ro.jobs import emit
 _real_fetch = jd_fetch.fetch_jd
 FETCHES = []  # canned fetches started, readable at /api/_mock/fetches

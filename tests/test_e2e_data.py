@@ -72,3 +72,7 @@ def keyword_decisions(user_prompt):
             changes.append({"target_id": "p7", "new_text": p7.replace("Owned AWS deployments", f"Owned AWS deployments on {noted_add[0]}", 1),
                             "type": "keyword", "reason": f"Your note ties {noted_add[0]} to this work.", "jd_keywords": [noted_add[0]]})
     return {"decisions": decisions, "changes": changes}
+
+# A job posting that contains every keyword in JD (keywords not in the posting are dropped by analyze_jd)
+JD_TEXT = ("Globex is hiring a Backend Engineer. Required: Python, REST APIs and AWS, building microservices. "
+           "Preferred: CI/CD, Docker, PostgreSQL and attention to detail. Nice to have: code review culture and Kubernetes.")

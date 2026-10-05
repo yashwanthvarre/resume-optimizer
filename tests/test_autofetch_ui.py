@@ -31,7 +31,7 @@ try:
         pg = b.new_page()
         errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.goto(URL); pg.wait_for_timeout(400)
-        if pg.locator("#settingsDlg[open]").count(): pg.keyboard.press("Escape")
+        if pg.locator("#settingsDlg").count(): pg.keyboard.press("Escape")
 
         # 1) typing: one fetch ~600ms after typing stops; blur / Enter on the same URL don't refetch
         pg.click("#jdUrl"); pg.keyboard.type("https://jobs.example.test/1", delay=25)

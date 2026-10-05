@@ -26,6 +26,7 @@ CH = {"overall_assessment": "Good fit.", "suggestions": [{"text": "Add Kubernete
         {"target_id": "p5", "new_text": "Acme Corp\tSoftware Engineer (Backend)\tJan 2022 – Present", "type": "reword", "reason": "title"},
       ]}
 analyzer._call_tool = lambda s, u, tool, mt: JD if tool["name"] == "record_jd" else CH
+JD_TEXT = "Backend Engineer at Globex: Python, REST APIs, AWS and CI/CD required; Kubernetes is a plus. " * 2
 
 c = TestClient(appmod.app)
 c.post("/api/settings", json={"file_format": "docx"})  # these checks read the .docx; tests/test_pdf.py covers PDF
@@ -34,17 +35,17 @@ src = (Path(__file__).parent / "sample_resume.docx").resolve()
 r = c.post("/api/resume/load", json={"path": f'"{src}"'}); assert r.status_code == 200, r.text
 sid = r.json()["session_id"]
 assert c.post("/api/resume/load", json={"path": "/nope/x.docx"}).status_code == 400
-r = c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}); assert r.status_code == 200, r.text
+r = c.post("/api/analyze", json={"session_id": sid, "jd_text": JD_TEXT}); assert r.status_code == 200, r.text
 res = r.json()
 ids = [x["target_id"] for x in res["changes"]]
 print("changes:", ids); assert ids == ["p3", "p5", "p6", "p7"]
 assert res["keyword_gaps"] == [], res["keyword_gaps"]  # this canned response has none
 assert res["notices"] == [], res["notices"]
 CH["notices"] = [{"text": "Portfolio link required."}, {"text": "  "}]
-assert c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()["notices"] == ["Portfolio link required."]
+assert c.post("/api/analyze", json={"session_id": sid, "jd_text": JD_TEXT}).json()["notices"] == ["Portfolio link required."]
 del CH["notices"]
 CH["keyword_gaps"] = [{"term": "Kubernetes", "reason": "Not shown in your resume."}, {"term": "", "reason": "junk"}]
-gaps = c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()["keyword_gaps"]
+gaps = c.post("/api/analyze", json={"session_id": sid, "jd_text": JD_TEXT}).json()["keyword_gaps"]
 assert gaps == [{"term": "Kubernetes", "reason": "Not shown in your resume."}], gaps
 print("warnings:", {x["target_id"]: x["warnings"] for x in res["changes"] if x["warnings"]})
 # accept p5, p6, p7 (reject summary)
