@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 import app as appmod
 from ro import analyzer, pdf_export as P, resume_io as R
 sys.path.insert(0, str(Path(__file__).parent))
-from test_e2e_data import JD, CH, COVER
+from test_e2e_data import JD, CH, COVER, JD_TEXT
 
 ROLE = {"role": JD["role"]}
 analyzer._call_tool = lambda s, u, tool, mt: {"record_jd": {**JD, **ROLE}, "record_changes": CH, "record_cover_letter": COVER}[tool["name"]]
@@ -103,7 +103,7 @@ def test_fallbacks_and_limits():
 
 def session(src=SRC):
     sid = c.post("/api/resume/load", json={"path": str(src)}).json()["session_id"]
-    c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200})
+    c.post("/api/analyze", json={"session_id": sid, "jd_text": JD_TEXT})
     return sid
 
 

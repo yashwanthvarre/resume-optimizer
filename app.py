@@ -173,12 +173,15 @@ def _analyze_work(s: dict, jd_text: str) -> dict:
     try:
         emit("analyze_jd", "running", f"Sending the job description to {engine}")
         jd = analyzer.analyze_jd(jd_text)
+        not_in_jd = jd.pop("dropped_keywords", [])  # never shown to later prompts
         kws = jd.get("keywords", [])
         req = sum(1 for k in kws if k.get("importance") == "required")
         emit("analyze_jd", "done",
-             f"Extracted {_plural(len(kws), 'keyword')} ({req} required) and {_plural(len(jd.get('patterns', [])), 'theme')}",
+             f"Extracted {_plural(len(kws), 'keyword')} ({req} required) and {_plural(len(jd.get('patterns', [])), 'theme')}"
+             + (f"; dropped {_plural(len(not_in_jd), 'keyword')} not in the JD" if not_in_jd else ""),
              detail=[f"{k['term']} — {k.get('importance', '')}" for k in kws]
-             + [f"Theme: {t}" for t in jd.get("patterns", [])])
+             + [f"Theme: {t}" for t in jd.get("patterns", [])]
+             + [f"Dropped (not in the JD): {t}" for t in not_in_jd])
         check()
         emit("propose", "running", f"Comparing {_plural(len(paras), 'paragraph')} against the job and drafting edits")
         raw = analyzer.propose_changes(jd, s["paragraphs"])
@@ -189,6 +192,7 @@ def _analyze_work(s: dict, jd_text: str) -> dict:
     check()
     emit("validate", "running", "Checking every edit against your original resume")
     result = analyzer.validate_changes(raw, s["paragraphs"])
+    analyzer.tag_changes(result["changes"], jd)
     kept, dropped = result["changes"], result["dropped"]
     flagged = [f"{c['target_id']}: {w}" for c in kept for w in c["warnings"]]
     msg = f"{_plural(len(kept), 'edit')} kept"
@@ -197,6 +201,8 @@ def _analyze_work(s: dict, jd_text: str) -> dict:
     if flagged:
         msg += f", {len({f.split(':')[0] for f in flagged})} flagged for you to verify"
     emit("validate", "done", msg, detail=[f"Dropped {d}" for d in dropped] + [f"Flagged {f}" for f in flagged] or None)
+    terms = {k["term"].lower() for k in jd.get("keywords", [])}
+    result["keyword_gaps"] = [g for g in result["keyword_gaps"] if g["term"].lower() in terms]  # verified keywords only
     s["jd"] = jd
     return {"jd": jd, **result}
 

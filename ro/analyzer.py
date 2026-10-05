@@ -20,25 +20,34 @@ JD_TOOL = {
             "responsibilities": {"type": "array", "items": {"type": "string"}},
             "keywords": {
                 "type": "array",
-                "description": "15-35 ATS keywords/phrases a recruiter or ATS would scan for. "
-                               "Hard skills, tools, methods, domain terms, certifications.",
+                "description": "Every ATS keyword/phrase the JD itself names: languages, frameworks, libraries, "
+                               "tools, platforms, databases, cloud services, methods, certifications, soft skills. "
+                               "Named things, not categories: for 'frameworks such as React' the keyword is 'React'. "
+                               "ONLY terms whose words appear in the JD text; "
+                               "there is no minimum, so a short JD gives a short list. Never infer, summarise or "
+                               "add skills 'typical for the role' that the JD doesn't write out.",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "term": {"type": "string", "description": "Canonical form as written in the JD"},
+                        "term": {"type": "string", "description": "A short keyword phrase (usually 1-4 words) copied verbatim from "
+                                 "the JD, exactly as written there: a skill, tool or practice, not a whole requirement "
+                                 "sentence. No paraphrasing, generalising or merging two phrases into one"},
+                        "evidence": {"type": "string", "description": "The exact JD sentence or fragment the term was copied from"},
                         "variants": {"type": "array", "items": {"type": "string"},
-                                     "description": "Other spellings/abbreviations, e.g. ['k8s'] for Kubernetes"},
+                                     "description": "Only other spellings/abbreviations of the SAME term, e.g. ['k8s'] for "
+                                                    "Kubernetes. Never a different or broader concept"},
                         "importance": {"type": "string", "enum": ["required", "preferred", "nice"],
                                        "description": "required = the JD explicitly states it as a must-have / minimum "
                                                       "qualification (at most ~12 keywords). Everything listed as "
                                                       "preferred, a plus or 'nice to have' is preferred/nice."},
                         "category": {"type": "string", "enum": ["hard_skill", "tool", "soft_skill", "domain", "certification", "other"]},
                     },
-                    "required": ["term", "importance", "category"],
+                    "required": ["term", "evidence", "importance", "category"],
                 },
             },
             "patterns": {"type": "array", "items": {"type": "string"},
-                         "description": "Themes the JD repeats (e.g. 'ownership of end-to-end delivery', 'stakeholder communication')"},
+                         "description": "Themes the JD itself repeats, in the JD's own wording. Not generic recruiter phrases "
+                                        "the JD doesn't use"},
         },
         "required": ["company", "role", "summary", "keywords", "patterns"],
     },
@@ -341,13 +350,136 @@ def _call_api_with_search(system: str, user: str, tool: dict, max_tokens: int, m
 
 
 def analyze_jd(jd_text: str) -> dict:
-    return _call_tool(
+    jd = _call_tool(
         SYSTEM,
         "Analyze this job description. Ignore website navigation, cookie notices, "
-        "benefits boilerplate and EEO statements. Mark a keyword 'required' only when the JD states it as a "
-        "must-have or minimum qualification (at most ~12); tag soft skills with category 'soft_skill'.\n\n<job_description>\n" + jd_text[:30000] +
+        "benefits boilerplate and EEO statements. Keywords must be copied word for word from the JD: list only "
+        "terms that literally appear in it, and none it merely implies (e.g. don't add 'cross-functional "
+        "collaboration' unless the JD writes those words). Copy the keyword itself, not the sentence around it: from "
+        "'Experience integrating AI tools into the software development process' the keyword is 'AI tools'. "
+        "Keywords are NAMED things, spelled exactly as the JD spells them. When the JD writes '<category> such as "
+        "A, B', '<category> (A or B)', '<category> like A' or '<category>, A preferred', extract A and B as separate "
+        "keywords and NOT the category. Examples: 'modern JavaScript frameworks such as React and Next.js' -> "
+        "'React', 'Next.js' (never 'modern JavaScript frameworks'); 'state management libraries (Redux or "
+        "Zustand)' -> 'Redux', 'Zustand'; 'cloud platforms, AWS preferred' -> 'AWS'. Keep a category phrase only "
+        "when the JD names nothing specific for it ('Knowledge of database systems.' -> 'database systems'). "
+        "Fewer, exact keywords beat a long list. Mark a keyword "
+        "'required' only when the JD states it as a must-have or minimum qualification (at most ~12); tag soft "
+        "skills with category 'soft_skill'.\n\n<job_description>\n" + jd_text[:30000] +
         "\n</job_description>",
         JD_TOOL, 4000)
+    return ground_keywords(jd, jd_text)
+
+
+def ground_keywords(jd: dict, jd_text: str) -> dict:
+    """Drop every keyword (and variant) whose words don't appear in the JD text. The model is told to copy
+    terms verbatim; this makes sure of it. Dropped terms are listed in jd["dropped_keywords"]."""
+    kept, dropped, seen = [], [], set()
+    for k in jd.get("keywords", []) or []:
+        term = (k.get("term") or "").strip() if isinstance(k, dict) else ""
+        if not term:
+            continue
+        variants = [v for v in k.get("variants") or [] if isinstance(v, str) and v.strip()]
+        found = [t for t in [term, *variants] if mentions(jd_text, t)]
+        if not found:
+            dropped.append(term)
+            continue
+        if not mentions(jd_text, term):  # only a variant is in the JD: use the JD's own wording as the term
+            term, variants = found[0], [term, *variants]
+        if term.lower() in seen:
+            continue
+        seen.add(term.lower())
+        # a variant must be in the JD too, or be an abbreviation of the term (k8s, JS, Postgres) - never a new concept
+        variants = [v for v in variants if v.lower() != term.lower() and (mentions(jd_text, v) or _abbrev(v, term))]
+        kept.append({**k, "term": term, "variants": variants})
+    kept, generic = _drop_categories(kept, jd_text)
+    return {**jd, "keywords": kept, "dropped_keywords": dropped + generic}
+
+
+_HEADS = {"framework", "technology", "tool", "platform", "language", "library", "solution", "system", "service",
+          "database", "stack", "environment", "application", "software", "utility", "package"}
+_DESCRIPTORS = {"modern", "relevant", "various", "related", "other", "popular", "common", "industry-standard",
+                "contemporary", "emerging", "latest", "similar", "standard"}
+# what links a category to the named items that follow it: "frameworks such as React", "libraries (Redux"
+_LEAD = re.compile(r"^\s*(?:\(|:|-|\u2014|such as\b|like\b|e\.g\.?|i\.e\.?|including\b|especially\b|"
+                   r"particularly\b|for example\b|for instance\b|namely\b)", re.I)
+_PREFERRED = re.compile(r"^\s*,\s*(?P<item>[^,.;()]+?)\s+(?:preferred|ideally|a plus|especially|in particular)\b", re.I)
+_LIST_END = re.compile(r"\.(?=\s|$)|[;)\n]|\b(?:is|are|preferred|ideally|a plus|to|for|in order)\b", re.I)
+
+
+def _is_category(term: str) -> bool:
+    words = re.findall(r"[a-z][a-z-]*", term.lower())
+    if len(words) < 2:
+        return False
+    head = re.sub(r"(?:ies)$", "y", words[-1])
+    head = re.sub(r"(?<!s)s$", "", head)
+    return head in _HEADS or words[0] in _DESCRIPTORS
+
+
+def _named_items(after: str) -> list[str]:
+    """The names listed right after a category: "such as React and Next.js." -> ["React", "Next.js"]."""
+    m = _PREFERRED.match(after)
+    if m:
+        return [m["item"].strip()]
+    m = _LEAD.match(after)
+    if not m:
+        return []
+    rest = after[m.end():]
+    rest = rest[:_LIST_END.search(rest).start()] if _LIST_END.search(rest) else rest
+    parts = re.split(r",|/|\band\b|\bor\b|&", rest)
+    # a name: at most 3 words, starts with a capital letter or holds a digit or symbol (React, Node.js, C#, k8s)
+    return [x.strip() for x in parts if x.strip() and len(x.split()) <= 3 and re.search(r"^[A-Z]|[\d.#+]", x.strip())]
+
+
+def _drop_categories(kws: list[dict], jd_text: str) -> tuple[list[dict], list[str]]:
+    """A category phrase ("modern frameworks", "cloud platforms") is dropped wherever the JD names the specific
+    items right after it; those named items are added if the model missed them. A category the JD never
+    narrows down ("Knowledge of database systems.") stays."""
+    from .resume_io import kw_regex
+    have = {k["term"].lower() for k in kws}
+    out, dropped, added = [], [], []
+    for k in kws:
+        if not _is_category(k["term"]):
+            out.append(k)
+            continue
+        items = []
+        for m in kw_regex(k["term"]).finditer(jd_text):
+            items += _named_items(jd_text[m.end("k"):m.end("k") + 200])
+        items = [x for x in dict.fromkeys(items) if mentions(jd_text, x) and not _is_category(x)]
+        if not items:
+            out.append(k)
+            continue
+        dropped.append(f"{k['term']} (the JD names {', '.join(items)})")
+        for x in items:
+            if x.lower() not in have:
+                have.add(x.lower())
+                added.append({"term": x, "variants": [], "importance": k.get("importance", "preferred"),
+                              "category": "tool", "evidence": k.get("evidence", "")})
+    return out + added, dropped
+
+
+def tag_changes(changes: list[dict], jd: dict) -> None:
+    """Set each change's jd_keywords to the JD keywords its new text contains (ones it adds, or ones the model
+    tagged). The model's own tags are never shown as-is, so a phrase that isn't a JD keyword can't appear."""
+    for c in changes:
+        asked = {t.lower() for t in c.get("jd_keywords") or [] if isinstance(t, str)}
+        tags = []
+        for k in jd.get("keywords", []):
+            forms = [k["term"], *(k.get("variants") or [])]
+            if not any(mentions(c["new_text"], f) for f in forms):
+                continue
+            if k["term"].lower() in asked or not any(mentions(c.get("original_text", ""), f) for f in forms):
+                tags.append(k["term"])
+        c["jd_keywords"] = tags
+
+
+def _abbrev(short: str, term: str) -> bool:
+    """short's letters appear in order in term, starting with its first letter: k8s/Kubernetes, JS/JavaScript."""
+    a, b = re.sub(r"[^a-z]", "", short.lower()), re.sub(r"[^a-z]", "", term.lower())
+    if not a or not b or a[0] != b[0] or len(a) >= len(b):
+        return False
+    it = iter(b)
+    return all(ch in it for ch in a)
 
 
 def _para_lines(paragraphs: list[dict], edits: dict[str, str] | None = None) -> list[str]:

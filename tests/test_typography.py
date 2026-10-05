@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 import app as appmod
 from ro import analyzer, resume_io as R
 sys.path.insert(0, str(Path(__file__).parent))
-from test_e2e_data import JD, CH, COVER
+from test_e2e_data import JD, CH, COVER, JD_TEXT
 
 analyzer._call_tool = lambda s, u, tool, mt: {"record_jd": JD, "record_changes": CH, "record_cover_letter": COVER}[tool["name"]]
 OUT = Path(tempfile.mkdtemp())
@@ -145,7 +145,7 @@ def test_ats_round_trip_docx_and_rebuilt():
                            "• Built REST APIs in Python for customer orders and payments across two regions.\nSKILLS\nPython, AWS, SQL\n")
             src = txt
         sid = c.post("/api/resume/load", json={"path": str(src)}).json()["session_id"]
-        res = c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200}).json()
+        res = c.post("/api/analyze", json={"session_id": sid, "jd_text": JD_TEXT}).json()
         paras = c.post("/api/resume/load", json={"path": str(src)}).json()
         accepted = [{"target_id": x["target_id"], "new_text": x["new_text"]} for x in res["changes"]
                     if x["target_id"] != "p5" and src.suffix == ".docx"]   # canned ids only fit the sample .docx
@@ -170,7 +170,7 @@ def test_settings_and_letter():
     cfg = c.post("/api/settings", json={"doc_font": "keep", "bold_keywords": False}).json()
     assert cfg["doc_font"] == "keep" and cfg["bold_keywords"] is False
     sid = c.post("/api/resume/load", json={"path": str(SRC)}).json()["session_id"]
-    c.post("/api/analyze", json={"session_id": sid, "jd_text": "x" * 200})
+    c.post("/api/analyze", json={"session_id": sid, "jd_text": JD_TEXT})
     out = c.post("/api/export", json={"session_id": sid, "accepted": [], "output_dir": str(OUT)}).json()
     doc = Document(out["path"])
     assert not any(r.bold for p in doc.paragraphs if p.text.startswith("Python, Flask") for r in p.runs)
