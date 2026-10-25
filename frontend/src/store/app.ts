@@ -14,6 +14,7 @@ export type View = "setup" | "review" | "cover";
 export type Filter = "all" | "on" | "off";
 export type DiffMode = "auto" | "inline" | "stacked";
 export type Tone = "formal" | "warm" | "concise";
+export type DlFormat = "pdf" | "docx";
 
 /** One "Not added" keyword in the Add-keywords panel.
  *  add = Claude researches the keyword and writes it in from the resume · note = the user's quick idea
@@ -91,6 +92,7 @@ export interface AppState {
   addedNow: { ids: string[]; at: number };
   exportStatus: Status;
   exporting: "" | "resume" | "cover" | "both";
+  dlFormat: DlFormat | null; // picked next to Download; null = the Settings choice
 
   // keyword sheets
   sheet: null | "keywords" | "gaps";
@@ -134,7 +136,7 @@ export const initialState: AppState = {
   analyzing: false, analyzeJob: null, analyzeStatus: st(), progressShown: false,
   analysis: null, kws: [], kwAll: [], selected: new Set(), edits: {}, filter: "all", kwFilter: null, pop: null, editorOpen: false,
   exported: false, showMarks: true, diffMode: storedDiffMode(), noticeOpen: true, menuOpen: false, addedNow: { ids: [], at: 0 },
-  exportStatus: st(), exporting: "",
+  exportStatus: st(), exporting: "", dlFormat: null,
   sheet: null, gapFocus: { terms: [], at: 0 }, gaps: {}, gapExtra: [], gapsSummary: "", gapsJob: null, gapsStatus: st(),
   cover: null, letter: emptyLetter, coverEdited: false, tone: "warm", manager: "", why: "", coverJob: null, coverStatus: st(),
   coverFormOpen: true, boldLetterKw: false, cvExportStatus: st(),

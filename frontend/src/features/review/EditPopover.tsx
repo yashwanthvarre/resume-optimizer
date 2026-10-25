@@ -8,7 +8,7 @@ import { set, useApp, type DiffMode } from "../../store/app";
 import { changeText, visibleEdits } from "../../store/derive";
 import { byId, closePop, resetEdit, saveEdit, stepPop, toggleChange } from "./actions";
 
-const TYPE_LABEL: Record<string, string> = { reword: "Reworded", keyword: "Keyword", quantify: "Impact", reorder: "Reordered", tighten: "Tightened", summary: "Summary" };
+const TYPE_LABEL: Record<string, string> = { reword: "Reworded", keyword: "Keyword", quantify: "Impact", reorder: "Reordered", tighten: "Tightened", summary: "Summary", spelling: "Match JD spelling", new_bullet: "New bullet" };
 
 function Diff({ a, b, mode }: { a: string; b: string; mode: DiffMode }) {
   const ops = diffOps(a, b);

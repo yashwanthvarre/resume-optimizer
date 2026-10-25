@@ -425,18 +425,84 @@ def contact_header(paragraphs: list[dict], edits: dict[str, str] | None = None) 
 
 
 # --------------------------------------------------------------------------- Typography
-def kw_regex(term: str) -> re.Pattern:
-    """Whole words, flexible spaces/hyphens, simple plurals either way ("CI/CD pipelines" matches "CI/CD pipeline").
-    Group "k" is the keyword itself."""
+_PLURAL = re.compile(r"(?:[a-z]{3}[^s\W]|[A-Z]{2})s$")  # a plural ("pipelines", "APIs"): match the singular too
+_ALNUM = re.compile(r"[A-Za-z0-9]")
+_LOOSE_SEP = r"[.\s-]?"  # ".", "-", a space or nothing are all the same in a LOOSE match
+
+
+def kw_base(term: str) -> str:
+    """The term without a simple plural "s": what kw_regex matches before its optional "s"/"es"."""
     term = term.strip()
-    if re.search(r"(?:[a-z]{3}[^s\W]|[A-Z]{2})s$", term):  # a plural ("pipelines", "APIs"): match the singular too
-        term = term[:-1]
-    t = re.escape(term).replace(r"\ ", r"[\s-]+")
-    return re.compile(rf"(?:^|(?<=[^A-Za-z0-9]))(?P<k>{t}(?:s|es)?)(?=$|[^A-Za-z0-9])", re.I)
+    return term[:-1] if _PLURAL.search(term) else term
+
+
+def kw_regex(term: str, loose: bool = False) -> re.Pattern:
+    """Whole words and simple plurals either way ("CI/CD pipelines" matches "CI/CD pipeline"). Group "k" is the
+    keyword itself and group "pl" its plural ending. Same as kwRegex in frontend/src/lib/keywords.ts.
+    EXACT (default): case-sensitive, character for character ("Java" matches "Java", never "java"); only a term that
+    starts lowercase may start with a capital too, as at the start of a sentence ("Unit testing" for "unit testing").
+    LOOSE: ignores case and treats ".", "-", a space and nothing as the same ("reactjs", "React.js", "React JS"
+    all match "ReactJS"); still whole words, so "Java" never matches "JavaScript"."""
+    base = kw_base(term)
+    if not loose:
+        t = re.escape(base).replace(r"\ ", r"\s")
+        if re.match(r"[a-z]", base):
+            t = f"[{base[0]}{base[0].upper()}]{t[1:]}"
+    else:
+        t, prev = "", ""
+        for ch in base:
+            if ch in ".-" or ch.isspace():
+                t += "" if t.endswith(_LOOSE_SEP) else _LOOSE_SEP
+            else:
+                if _ALNUM.match(prev) and _ALNUM.match(ch):
+                    t += _LOOSE_SEP
+                t += re.escape(ch)
+            prev = ch
+    return re.compile(rf"(?:^|(?<=[^A-Za-z0-9]))(?P<k>{t}(?P<pl>s|es)?)(?=$|[^A-Za-z0-9])", re.I if loose else 0)
+
+
+# text that isn't prose: URLs, email addresses and file paths (github.com/me/java-app, ~/src/app.py)
+_NOT_PROSE = re.compile(
+    r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"
+    r"|\b(?:https?://|www\.)\S+"
+    r"|\b[\w-]+(?:\.[\w-]+)*\.(?:com|org|net|io|dev|app|ai|co|edu|gov|me|us|uk|ca|de|info|xyz|tech)(?:/\S*)?(?![\w-])"
+    r"|(?:[A-Za-z]:\\|~/|\.{1,2}/|(?<![\w/])/(?=[\w.-]+/))\S+"
+    r"|[\w.-]+(?:/[\w.-]+){2,}", re.I | re.A)
+
+
+def not_prose_spans(text: str) -> list[tuple[int, int]]:
+    return [m.span() for m in _NOT_PROSE.finditer(text)]
+
+
+# ordinary English words that are also tech names: "react to", "go-to-market", "spring" are never React, Go, Spring
+COMMON_WORDS = frozenset("""access ant backbone bootstrap chef consul dart elastic ember excel express flask flutter go
+    helm hive ionic jest less linear make material meteor mocha nest next notion office outlook pig project puppet
+    rails react ruby rust salt sketch slack spark spring storm swift teams unity vault word zoom""".split())
+
+
+def _english(found: str) -> bool:
+    return bool(re.fullmatch(r"[a-z]+", found)) and (len(found) == 1 or found in COMMON_WORDS)
+
+
+def loose_only(text: str, term: str, variants: list[str] | None = None) -> list[tuple[re.Match, str]]:
+    """(match, form) for each LOOSE match of term or a variant that isn't an EXACT match of term, an ordinary
+    lowercase English word, or inside a URL, email address or file path: where the text spells a JD keyword
+    differently. Same as looseOnly in frontend/src/lib/keywords.ts."""
+    taken = [m.span("k") for m in kw_regex(term).finditer(text)] + not_prose_spans(text)
+    out = []
+    for f in [term, *(variants or [])]:
+        if not f or not f.strip():
+            continue
+        for m in kw_regex(f, loose=True).finditer(text):
+            sp = m.span("k")
+            if not _english(m["k"]) and not any(a < sp[1] and sp[0] < b for a, b in taken):
+                taken.append(sp)
+                out.append((m, f))
+    return sorted(out, key=lambda x: x[0].start("k"))
 
 
 def keyword_spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
-    """Merged [start, end) character spans of every keyword found in text."""
+    """Merged [start, end) character spans of every EXACT keyword match in text."""
     spans = sorted((m.start("k"), m.end("k")) for t in terms if t and t.strip()
                    for m in kw_regex(t).finditer(text))
     out: list[list[int]] = []
@@ -642,23 +708,55 @@ def finish_resume(doc, paragraphs: list[dict], elements: dict, keywords: list[st
         apply_font(doc, font)
 
 
+_PARA_IDS = {"{http://schemas.microsoft.com/office/word/2010/wordml}paraId",
+             "{http://schemas.microsoft.com/office/word/2010/wordml}textId"}
+_BOOKMARK_START, _BOOKMARK_END = qn("w:bookmarkStart"), qn("w:bookmarkEnd")
+
+
+def split_new_bullets(p: dict, text: str) -> tuple[str, list[str]]:
+    """A bullet's edited text can end with new bullets, one per extra line (see analyzer.merge_new_bullets).
+    Returns (the paragraph's own text, [new bullets]). Line breaks the paragraph already had stay in it."""
+    if p["kind"] != "bullet":
+        return text, []
+    lines = text.split("\n")
+    keep = p["text"].count("\n") + 1
+    return "\n".join(lines[:keep]), [t for t in lines[keep:] if t.strip()]
+
+
 def export_docx(source: Path, source_type: str, paragraphs: list[dict],
                 edits: dict[str, str], dest: Path, keywords: list[str] | None = None,
                 font: str = DOC_FONT, bold: bool = True, title: str = "", author: str = "") -> Path:
     """edits: {paragraph_id: new_text} for the accepted changes only. keywords: job-posting terms
     (and variants) to show in bold."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    final = [{**p, "text": edits.get(p["id"], p["text"])} for p in paragraphs]
+    final = []
+    for p in paragraphs:
+        first, extra = split_new_bullets(p, edits.get(p["id"], p["text"]))
+        final.append({**p, "text": first})
+        final += [{**p, "id": f'{p["id"]}+{n}', "text": t} for n, t in enumerate(extra, 1)]
     if source_type == "docx":
         tmp = dest.with_suffix(".tmp.docx")
         shutil.copyfile(source, tmp)
         doc = Document(str(tmp))
         ps = _docx_paragraphs(doc)
-        for pid, new in edits.items():
-            idx = int(pid[1:])
-            if 0 <= idx < len(ps):
-                _apply_text(ps[idx], new)
-        elements = {p["id"]: ps[int(p["id"][1:])] for p in final if int(p["id"][1:]) < len(ps)}
+        elements, last = {}, None
+        for p in final:
+            base, _, n = p["id"].partition("+")
+            idx = int(base[1:])
+            if idx >= len(ps):
+                continue
+            if n:   # a new bullet: a copy of the paragraph it follows, so it keeps that bullet's formatting
+                el = copy.deepcopy(ps[idx])
+                for a in [a for a in el.attrib if a in _PARA_IDS]:
+                    del el.attrib[a]   # Word wants these unique
+                for b in [b for b in el.iter(_BOOKMARK_START, _BOOKMARK_END)]:
+                    b.getparent().remove(b)
+                last.addnext(el)
+            else:
+                el = ps[idx]
+            if n or p["id"] in edits:
+                _apply_text(el, p["text"])
+            elements[p["id"]], last = el, el
         finish_resume(doc, final, elements, keywords or [], font, bold)
         set_properties(doc, title, author)
         doc.save(str(dest))

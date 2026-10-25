@@ -112,7 +112,7 @@ export function KeywordsPanel() {
   return (
     <>
       <Sheet id="kwDlg" labelId="kwTitle" open={open} onClose={() => { closeSheet(); document.getElementById("kwSummaryBtn")?.focus(); }} title="Keywords"
-        sub={<span id="kwStats">Your resume had {k.had}. With your edits it has {k.nowN} of the {k.total} keywords in this job.</span>}>
+        sub={<span id="kwStats">Your resume had {k.had}. With your edits it has {k.nowN} of the {k.total} keywords in this job{k.wrongKw.length ? `, and spells ${k.wrongKw.length} differently` : ""}.</span>}>
         <div className="contents">
           <div className="mt-1.5 mb-2 flex h-1.5 overflow-hidden rounded-full bg-sunk" aria-hidden="true">
             <motion.span className="h-full bg-sage" initial={{ width: 0 }} animate={{ width: `${k.total ? (100 * Math.min(k.had, k.nowN)) / k.total : 0}%` }} transition={{ type: "spring", stiffness: 120, damping: 20 }} />
@@ -132,6 +132,19 @@ export function KeywordsPanel() {
               {!k.inKw.length && <span className="muted small">None yet.</span>}
             </div>
             <p className="muted small"><span className="new-tag">new</span> added by the edits you accepted. Click a keyword to see those edits on the page.</p>
+            {k.wrongKw.length > 0 && <>
+              <h4>Wrong spelling <span className="muted">({k.wrongKw.length})</span></h4>
+              <div id="kwWrong" className="mb-2 flex flex-wrap gap-1.5"
+                onClick={(e) => { const ch = chipEl(e); if (ch) { closeSheet(); setKwFilter(s.kwFilter === ch.dataset.term ? null : ch.dataset.term!); } }}>
+                {k.wrongKw.map(({ k: x, found }) => (
+                  <motion.button key={x.term} layout layoutId={`kw-${x.term}`} transition={chipSpring} type="button" data-term={x.term}
+                    className={`chip wrong ${x.term === s.kwFilter ? "active" : ""}`} title="Show the edit that matches the job posting's spelling">
+                    {found.join(", ")} → {x.term}
+                  </motion.button>
+                ))}
+              </div>
+              <p className="muted small">Your resume spells these differently from the job posting. Accept the “Match JD spelling” edits to fix them.</p>
+            </>}
             <h4>Not added <span className="muted">({k.outKw.length})</span></h4>
             <div id="kwOut" ref={outRef} className="mb-2 flex flex-wrap gap-1.5"
               onPointerOver={(e) => { if (e.pointerType !== "mouse") return; const ch = chipEl(e); if (ch && ch !== tip?.el) show(ch); else keep(); }}

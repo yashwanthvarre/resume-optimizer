@@ -17,6 +17,13 @@ function bold(text: string, all: RegExp[]): ReactNode {
   return out;
 }
 
+/** A bullet's edited text can end with new bullets, one per extra line; line breaks it already had stay in it. */
+function splitNew(kind: string, orig: string, raw: string): string[] {
+  if (kind !== "bullet") return [raw];
+  const lines = raw.split("\n"), keep = orig.split("\n").length;
+  return [lines.slice(0, keep).join("\n"), ...lines.slice(keep).filter((t) => t.trim())];
+}
+
 const reduce = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 interface ParaProps {
@@ -61,16 +68,19 @@ export function ResumePage() {
     const c = byTarget[p.id], blank = !p.text.trim();
     if (p.kind === "heading") body = true;
     const on = !!c && selected.has(c.id), raw = c ? (on ? changeText(s, c) : c.original_text) : p.text;
-    const text = norm(raw), isBody = body && p.kind !== "heading";
-    let cls = `pp ${p.kind}` + (first && !blank ? " first" : "") + (isBody && justifyOk(p.kind, raw) ? " just" : "");
+    const isBody = body && p.kind !== "heading", wasFirst = first && !blank;
     if (!blank) first = false;
-    let label: string | undefined;
+    let mark = "", label: string | undefined;
     if (c) {
-      cls += ` edit ${on ? "on" : "off"}${matchesFilter(s, c) ? " marked" : ""}${showMarks ? "" : " quiet"}${(c.warnings || []).length ? " flagged" : ""}${pop === c.id ? " current" : ""}`;
+      mark = ` edit ${on ? "on" : "off"}${matchesFilter(s, c) ? " marked" : ""}${showMarks ? "" : " quiet"}${(c.warnings || []).length ? " flagged" : ""}${pop === c.id ? " current" : ""}`;
       label = `${on ? "Accepted" : "Skipped"} edit: ${c.reason}`;
     }
-    return <Para key={p.id} id={p.id} cls={cls} text={text} boldOn={isBody && boldOn} kwAll={kwAll} changeId={c?.id} label={label}
-      flashAdded={c && addedNow.ids.includes(c.id) ? addedNow.at : 0} />;
+    return splitNew(p.kind, p.text, raw).map((line, n) => {
+      const cls = `pp ${p.kind}` + (wasFirst && !n ? " first" : "") + (isBody && justifyOk(p.kind, line) ? " just" : "") + mark;
+      const id = n ? `${p.id}-${n}` : p.id;
+      return <Para key={id} id={id} cls={cls} text={norm(line)} boldOn={isBody && boldOn} kwAll={kwAll} changeId={c?.id} label={label}
+        flashAdded={c && addedNow.ids.includes(c.id) ? addedNow.at : 0} />;
+    });
   });
 
   return (

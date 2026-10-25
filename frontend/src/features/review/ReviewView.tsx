@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { get, set, useApp } from "../../store/app";
-import { keywordStats, outFormat, roleLine, visibleEdits } from "../../store/derive";
+import { dlChoice, keywordStats, outFormat, roleLine, visibleEdits } from "../../store/derive";
 import { AnimatedNumber } from "../../ui/AnimatedNumber";
 import { Seg } from "../../ui/Seg";
 import { StatusLine } from "../../ui/StatusLine";
@@ -10,6 +10,7 @@ import { doExport, showCover } from "../coverLetter/actions";
 import { openGaps, openKeywords } from "../keywords/actions";
 import { closePop, selectAll, setDiffMode, setFilter, setKwFilter, stepPop, toggleChange } from "./actions";
 import { FileLine } from "./FileLine";
+import { FormatToggle } from "./FormatToggle";
 import { ResumePage } from "./ResumePage";
 
 const noticeText = (n: string | { text: string }) => (typeof n === "string" ? n : n.text);
@@ -89,7 +90,7 @@ function MoreMenu() {
 function DocBar() {
   const s = useApp();
   const k = useMemo(() => keywordStats(s), [s.kws, s.selected, s.edits, s.analysis, s.resume]);
-  const word = outFormat(s.cfg) === "docx" ? ".docx" : "PDF", n = s.selected.size;
+  const word = outFormat(s) === "docx" ? ".docx" : "PDF", n = s.selected.size;
   return (
     <>
       <div id="docBar" className="doc-bar no-print static z-10 grid gap-2 rounded-2xl border border-line p-2 shadow-1 md:sticky md:top-[calc(var(--topbar-h)+8px)] md:flex md:flex-wrap md:items-center md:gap-x-3 md:gap-y-2 md:py-1.5 md:pr-1.5 md:pl-2">
@@ -103,7 +104,7 @@ function DocBar() {
                   initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.5, opacity: 0 }}>+{k.added}</motion.span>
               )}
             </AnimatePresence>
-            <span id="kwMissing" className="text-[12.5px] font-medium text-ink-2">{k.missing ? `${k.missing} missing` : "all covered"}</span>
+            <span id="kwMissing" className="text-[12.5px] font-medium text-ink-2">{[k.missing && `${k.missing} missing`, k.wrongKw.length && `${k.wrongKw.length} wrong spelling`].filter(Boolean).join(" · ") || "all covered"}</span>
           </button>
           {k.outKw.length > 0 && (
             <button type="button" className="btn secondary sm" id="gapsOpen" onClick={() => openGaps()}>Add {k.outKw.length} keyword{k.outKw.length === 1 ? "" : "s"}</button>
@@ -124,6 +125,7 @@ function DocBar() {
           <MoreMenu />
         </div>
         <div className="flex items-center gap-1.5 md:ml-auto [&>button]:flex-1 md:[&>button]:flex-none">
+          <FormatToggle id="fmtSeg" />
           <button type="button" className="btn secondary" id="exportBtn" disabled={!!s.exporting}
             title={n ? `Download your resume with ${n} edit${n === 1 ? "" : "s"}` : "Download your resume unchanged"} onClick={() => void doExport("resume")}>
             Download {word}
@@ -137,12 +139,12 @@ function DocBar() {
 }
 
 function FmtNote() {
-  const { resume, cfg } = useApp();
+  const { resume, cfg, dlFormat } = useApp();
   if (!resume) return null;
-  const f = outFormat(cfg);
+  const f = outFormat({ cfg, dlFormat });
   const fmt = resume.keeps_formatting ? "Your Word layout is kept when you download." : "Download builds a clean new .docx (PDF/TXT layout can't be kept).";
   const out = f === "pdf" ? " Downloads as a PDF with the font embedded." : f === "both" ? " Downloads as a PDF; the .docx is saved next to it." : "";
-  const missing = cfg?.file_format !== "docx" && !cfg?.pdf_converter ? ` ${cfg?.pdf_missing} Saving .docx for now.` : "";
+  const missing = dlChoice({ cfg, dlFormat }) !== "docx" && !cfg?.pdf_converter ? ` ${cfg?.pdf_missing} Saving .docx for now.` : "";
   return (
     <p className="no-print muted small text-center" id="fmtNote">
       {fmt + out}

@@ -1,7 +1,7 @@
 // Pure helpers over the app state, shared by the review page, keyword panels, cover letter and downloads.
 import type { Change, Edit } from "../api/types";
-import { coverage, type Kw } from "../lib/keywords";
-import type { AppState, Gap } from "./app";
+import { coverage, hasExact, misspelled, type Kw } from "../lib/keywords";
+import type { AppState, DlFormat, Gap } from "./app";
 
 type S = Pick<AppState, "analysis" | "resume" | "selected" | "edits">;
 
@@ -36,20 +36,24 @@ export function matchesFilter(s: AppState, c: Change) {
   if (s.kwFilter) {
     const k = kwForTerm(s.kws, s.kwFilter), txt = changeText(s, c);
     const tagged = (c.jd_keywords || []).some((t) => t.toLowerCase() === s.kwFilter!.toLowerCase());
-    if (!tagged && !(k && k.res.some((r) => r.test(txt)))) return false;
+    if (!tagged && !(k && hasExact(k, txt))) return false;
   }
   return true;
 }
 
 export const visibleEdits = (s: AppState) => (s.analysis?.changes || []).filter((c) => matchesFilter(s, c));
 
-/** Keyword counts before and after the accepted edits. */
+/** Keyword counts before and after the accepted edits. Only the JD's exact spelling counts as present; a keyword
+ * the resume spells differently ("java" for "Java") is "wrong spelling", apart from the missing ones. */
 export function keywordStats(s: AppState) {
-  const before = coverage(fullText(s, false), s.kws), after = coverage(fullText(s, true), s.kws);
+  const now = fullText(s, true);
+  const before = coverage(fullText(s, false), s.kws), after = coverage(now, s.kws), spelled = misspelled(now, s.kws);
   const total = s.kws.length, had = before.size, nowN = after.size;
-  const inKw = s.kws.filter((k) => after.has(k.term)), outKw = s.kws.filter((k) => !after.has(k.term));
+  const inKw = s.kws.filter((k) => after.has(k.term));
+  const wrongKw = s.kws.filter((k) => spelled.has(k.term)).map((k) => ({ k, found: spelled.get(k.term)! }));
+  const outKw = s.kws.filter((k) => !after.has(k.term) && !spelled.has(k.term));
   const req = s.kws.filter((k) => k.importance === "required");
-  return { before, after, total, had, nowN, added: nowN - had, missing: total - nowN, inKw, outKw, req, reqHit: req.filter((k) => after.has(k.term)).length };
+  return { before, after, total, had, nowN, added: nowN - had, missing: outKw.length, inKw, wrongKw, outKw, req, reqHit: req.filter((k) => after.has(k.term)).length };
 }
 
 // ---- Add missing keywords
@@ -58,7 +62,13 @@ export const gapOf = (s: Pick<AppState, "gaps">, term: string) => s.gaps[term] ?
 
 export function inResumeNow(s: AppState, term: string, text = fullText(s, true)) {
   const k = kwForTerm(s.kws, term);
-  return !!k && k.res.some((r) => r.test(text));
+  return !!k && hasExact(k, text);
+}
+
+/** In the resume, but spelled differently from the JD: the "Match JD spelling" edit fixes it, not Add missing keywords. */
+export function misspelledNow(s: AppState, term: string, text = fullText(s, true)) {
+  const k = kwForTerm(s.kws, term);
+  return !!k && misspelled(text, [k]).size > 0;
 }
 
 export function gapStatus(s: AppState, term: string) {
@@ -71,7 +81,7 @@ export function gapStatus(s: AppState, term: string) {
 export function gapTerms(s: AppState) {
   const text = fullText(s, true);
   return [
-    ...s.kws.map((k) => k.term).filter((t) => !inResumeNow(s, t, text)),
+    ...s.kws.map((k) => k.term).filter((t) => !inResumeNow(s, t, text) && !misspelledNow(s, t, text)),
     ...s.gapExtra.filter((t) => !kwForTerm(s.kws, t) && gapStatus(s, t) !== "added"),
   ];
 }
@@ -82,7 +92,7 @@ export function gapReady(s: AppState, term: string) {
 }
 
 export function gapReason(s: AppState, k: Kw): { text: string; change?: string } {
-  const skipped = s.analysis?.changes.find((c) => !s.selected.has(c.id) && k.res.some((r) => r.test(changeText(s, c))));
+  const skipped = s.analysis?.changes.find((c) => !s.selected.has(c.id) && hasExact(k, changeText(s, c)));
   if (skipped) return { text: "A suggested edit adds this, but you skipped it.", change: skipped.id };
   const g = (s.analysis?.keyword_gaps || []).find((x) => x.term.trim().toLowerCase() === k.term.trim().toLowerCase());
   if (g) return { text: g.reason };
@@ -116,10 +126,20 @@ export function contactHeader(s: S) {
   return out.slice(0, 4);
 }
 
-/** What Download really saves: the Settings choice, unless PDF was asked for and no converter exists. */
-export function outFormat(cfg: AppState["cfg"]) {
-  const f = cfg?.file_format || "pdf";
-  return f !== "docx" && !cfg?.pdf_converter ? "docx" : f;
+/** The PDF / DOCX toggle next to Download: what was picked, else the Settings choice ("both" shows as PDF). */
+export const dlChoice = (s: Pick<AppState, "cfg" | "dlFormat">): DlFormat =>
+  s.dlFormat ?? (s.cfg?.file_format === "docx" ? "docx" : "pdf");
+
+/** The format Download asks for: the toggle, keeping Settings' "both" (PDF plus the .docx) when PDF is picked. */
+export function requestFormat(s: Pick<AppState, "cfg" | "dlFormat">) {
+  const c = dlChoice(s);
+  return c === "pdf" && s.cfg?.file_format === "both" ? "both" : c;
+}
+
+/** What Download really saves: the requested format, unless PDF was asked for and no converter exists. */
+export function outFormat(s: Pick<AppState, "cfg" | "dlFormat">) {
+  const f = requestFormat(s);
+  return f !== "docx" && !s.cfg?.pdf_converter ? "docx" : f;
 }
 
 export const resumeKey = (s: Pick<AppState, "resume">) => (s.resume ? s.resume.paragraphs.map((x) => x.text).join("\n") : "");

@@ -1,7 +1,7 @@
 import type { CoverLetter, ExportResult } from "../../api/types";
 import { cancelJob, errMsg, isCancelled, jobProgress, runJob } from "../../lib/jobs";
 import { get, set, st, type Status } from "../../store/app";
-import { acceptedEdits, contactHeader } from "../../store/derive";
+import { acceptedEdits, contactHeader, requestFormat } from "../../store/derive";
 import { toast } from "../../store/toasts";
 
 export function showCover() {
@@ -75,7 +75,7 @@ export async function doExport(what: "resume" | "cover" | "both") {
       session_id: s.resume.session_id, accepted: acceptedEdits(s), output_dir: s.cfg?.output_dir || null,
       company: jd.company || "", role: jd.role || "",
       include_resume: what !== "cover", cover_letter: what === "resume" ? null : gatherLetter(),
-      bold_letter_keywords: s.boldLetterKw,
+      bold_letter_keywords: s.boldLetterKw, format: requestFormat(s),
     }, (job) => {
       const { current } = jobProgress(job);
       if (job.status === "running" && current) status(st(current.message + "…", "info", true));
