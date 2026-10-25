@@ -3,9 +3,9 @@ import { useApp } from "../../store/app";
 import { outFormat } from "../../store/derive";
 
 export function FileLine({ kind }: { kind: "resume" | "cover" }) {
-  const n = useFileNames(), cfg = useApp((s) => s.cfg);
+  const n = useFileNames(), cfg = useApp((s) => s.cfg), dlFormat = useApp((s) => s.dlFormat);
   if (!n) return null;
-  const f = outFormat(cfg), ext = f === "docx" ? ".docx" : ".pdf";
+  const f = outFormat({ cfg, dlFormat }), ext = f === "docx" ? ".docx" : ".pdf";
   return (
     <span className="mt-1 block [overflow-wrap:anywhere]">
       Saves as <b className="font-semibold text-ink">{n[kind] + ext}</b>{f === "both" ? " (and .docx)" : ""}.

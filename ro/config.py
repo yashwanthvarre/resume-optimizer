@@ -92,7 +92,7 @@ def get_bold_keywords() -> bool:
 
 # Seeded as the default resume the first time config is read, if it's on this computer. Relative to the home
 # folder, so a test run with a temporary HOME never picks it up.
-SEED_DEFAULT_RESUME = Path("Documents") / "Resume" / "FullTime" / "Yashwanth_Varre_Software_Engineer_Resume.docx"
+SEED_DEFAULT_RESUME = Path("Documents") / "Resume" / "FullTime" / "Renaming" / "Yashwanth_Varre_Resume.docx"
 
 
 def get_default_resume_path() -> str:

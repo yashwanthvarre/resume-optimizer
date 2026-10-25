@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAutosize } from "../../hooks/useAutosize";
 import { useApp, type AppState } from "../../store/app";
 import { gapOf, gapReady, gapReason, gapStatus, gapTerms, kwForTerm, roleOptions } from "../../store/derive";
+import { hasLoose } from "../../lib/keywords";
 import { Collapse } from "../../ui/Collapse";
 import { Seg } from "../../ui/Seg";
 import { Sheet } from "../../ui/Sheet";
@@ -94,7 +95,7 @@ export function GapsPanel() {
     : n === 1 ? "Add 1 keyword" : `Add ${all ? "all " : ""}${n} ${all ? "missing " : ""}keywords`;
 
   // suggestions that don't name a keyword are advice; the rest already appear as rows
-  const advice = (s.analysis.suggestions || []).filter((x) => !s.kws.some((k) => k.res.some((r) => r.test(`${x.text} ${x.reason}`))));
+  const advice = (s.analysis.suggestions || []).filter((x) => !s.kws.some((k) => hasLoose(k, `${x.text} ${x.reason}`)));
 
   return (
     <Sheet id="gapsDlg" labelId="gapsTitle" open={open} wide onClose={closeSheet} title="Add missing keywords"

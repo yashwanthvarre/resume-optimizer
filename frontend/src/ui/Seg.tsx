@@ -5,6 +5,7 @@ export interface SegOption<T extends string> {
   value: T;
   label: string;
   title?: string;
+  disabled?: boolean;
 }
 
 /** Segmented control; the active pill slides to the chosen option. */
@@ -18,7 +19,7 @@ export function Seg<T extends string>({ id, options, value, onChange, label, lab
       {options.map((o) => {
         const on = o.value === value;
         return (
-          <button key={o.value} type="button" data-v={o.value} title={o.title} className={on ? "active" : ""}
+          <button key={o.value} type="button" data-v={o.value} title={o.title} disabled={o.disabled} className={on ? "active" : ""}
             {...(radio ? { role: "radio", "aria-checked": on } : { "aria-pressed": on })}
             onClick={() => onChange(o.value)}>
             {on && <motion.span layoutId={layoutId} className="seg-pill" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}

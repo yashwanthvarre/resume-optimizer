@@ -13,8 +13,8 @@ JD_TEXT = ("Software Engineer, Dublin OH (Hybrid). You will design and build RES
            "databases and CI/CD pipelines. Nice to have: AWS, Kubernetes.")
 kw = lambda t, **k: {"term": t, "importance": "preferred", "category": "hard_skill", **k}
 MODEL = {"company": "OCLC", "role": "Software Engineer", "summary": "Java APIs", "patterns": [],
-         "keywords": [kw("Java"), kw("Spring Boot"), kw("unit test"),               # singular of "unit tests": kept
-                      kw("RESTful API"), kw("sql databases"),                        # plural / case: kept
+         "keywords": [kw("Java"), kw("Spring Boot"), kw("unit test"),               # singular of "unit tests": kept as the JD spells it
+                      kw("RESTful API"), kw("sql databases"),                        # plural / case: kept as the JD spells it
                       kw("CI/CD pipeline"), kw("AWS"), kw("k8s", variants=["Kubernetes"]),  # only the variant is in the JD
                       kw("Legacy system maintenance"), kw("Large-scale datasets"),   # invented: dropped
                       kw("Cross-functional collaboration"), kw("Python"),
@@ -24,8 +24,8 @@ analyzer._call_tool = lambda s, u, tool, mt: MODEL
 
 jd = analyzer.analyze_jd(JD_TEXT)
 terms = [k["term"] for k in jd["keywords"]]
-assert terms == ["Java", "Spring Boot", "unit test", "RESTful API", "sql databases", "CI/CD pipeline", "AWS",
-                 "Kubernetes", "Agile"], terms
+assert terms == ["Java", "Spring Boot", "unit tests", "RESTful APIs", "SQL databases", "CI/CD pipelines", "AWS",
+                 "Kubernetes", "Agile"], terms  # spelled the way the JD writes them
 assert jd["dropped_keywords"] == ["Legacy system maintenance", "Large-scale datasets",
                                   "Cross-functional collaboration", "Python"], jd["dropped_keywords"]
 by = {k["term"]: k for k in jd["keywords"]}

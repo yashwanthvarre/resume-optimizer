@@ -77,6 +77,23 @@ def words(text):
     return text.split()
 
 
+def test_format_chosen_at_download():
+    """The PDF / DOCX toggle next to Download overrides Settings for that export only."""
+    with mock.patch.object(P, "converter", return_value="libreoffice"), \
+            mock.patch.object(P, "docx_to_pdf", side_effect=lambda src, dest: Path(dest).write_bytes(b"%PDF-1.4")), \
+            mock.patch.object(P, "page_count", return_value=1):
+        out, out_dir, *_ = export("pdf", format="docx")
+        assert out["format"] == "docx" and [p.suffix for p in out_dir.iterdir()] == [".docx"], out
+        out, out_dir, *_ = export("docx", format="pdf")
+        assert out["format"] == "pdf" and [p.suffix for p in out_dir.iterdir()] == [".pdf"], out
+        assert appmod.config.get_file_format() == "docx", "a download choice must not change Settings"
+        sid, accepted = session()
+        job = c.post("/api/jobs/export", json={"session_id": sid, "accepted": accepted, "format": "pdf"}).json()
+        assert [s["step"] for s in job["plan"]] == ["resume_docx", "resume_pdf"], job["plan"]
+    sid, accepted = session()
+    assert c.post("/api/export", json={"session_id": sid, "accepted": accepted, "format": "rtf"}).status_code == 422
+
+
 def test_real_pdf_is_ats_safe():
     if not HAVE_LO:
         print("SKIP real PDF checks: LibreOffice not installed"); return

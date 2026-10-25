@@ -93,6 +93,7 @@ body.keep-font { --doc-font: Calibri, Carlito, "Segoe UI", Arial, sans-serif; --
   .seg::-webkit-scrollbar { display: none; }
   .seg button { position: relative; flex: none; background: transparent; color: var(--color-ink-2); border: 0; border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 500; cursor: pointer; }
   .seg button:hover:not(:disabled) { color: var(--color-ink); }
+  .seg button:disabled { opacity: .45; cursor: not-allowed; }
   .seg button.active { color: var(--color-ink); font-weight: 600; }
   .seg button:focus-visible { outline: none; box-shadow: var(--ring); }
   .seg .seg-pill { position: absolute; inset: 0; background: var(--color-paper); border-radius: 999px; box-shadow: 0 1px 3px rgba(31, 35, 40, .12); z-index: 0; }
@@ -107,6 +108,9 @@ body.keep-font { --doc-font: Calibri, Carlito, "Segoe UI", Arial, sans-serif; --
   .chip.out { background: var(--color-paper); color: var(--color-ink-2); border-color: var(--color-line-strong); }
   .chip.out:hover, .chip.out[aria-describedby] { background: var(--color-sunk); color: var(--color-ink); }
   .chip.out.soft { border-style: dashed; }
+  .chip.wrong { background: var(--color-butter-bg); color: var(--color-butter); }
+  .chip.wrong:hover { background: color-mix(in srgb, var(--color-butter-bg) 70%, #f3e2a6); }
+  .chip.wrong.active { box-shadow: var(--ring); }
   .chip.req::after { content: " ★"; font-size: 9px; vertical-align: 1px; color: #b58b00; }
   .new-tag { font-size: 10px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--color-sky-bg); color: var(--color-sky); margin-left: 3px; vertical-align: 1px; }
 

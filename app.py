@@ -12,7 +12,7 @@ import threading
 import webbrowser
 import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
@@ -147,6 +147,7 @@ class ExportIn(BaseModel):
     include_resume: bool = True
     cover_letter: Optional[CoverLetter] = None
     bold_letter_keywords: bool = False
+    format: Optional[Literal["pdf", "docx", "both"]] = None  # chosen at download; None = the Settings choice
 
 
 # ------------------------------------------------------------------ work (shared by sync + job endpoints)
@@ -194,6 +195,7 @@ def _analyze_work(s: dict, jd_text: str) -> dict:
     emit("validate", "running", "Checking every edit against your original resume")
     result = analyzer.validate_changes(raw, s["paragraphs"])
     analyzer.tag_changes(result["changes"], jd)
+    result["changes"] = analyzer.spelling_changes(result["changes"], s["paragraphs"], jd)
     kept, dropped = result["changes"], result["dropped"]
     flagged = [f"{c['target_id']}: {w}" for c in kept for w in c["warnings"]]
     msg = f"{_plural(len(kept), 'edit')} kept"
@@ -384,16 +386,18 @@ def _justify_work(s: dict, body: JustifyIn) -> dict:
     emit("check", "running", "Checking the new wording against your resume and notes")
     notes = "\n".join(i["justification"] for i in noted)
     terms = list(asked.values())
+    new_bullet_drops = analyzer.merge_new_bullets(raw, s["paragraphs"], edits)
     result = analyzer.validate_changes(raw, s["paragraphs"], known_text=notes, id_prefix=f"k{secrets.token_hex(2)}_",
                                        limit=1 + len(terms), current=edits)
     per_kw: dict[str, int] = {}
-    kept, dropped = [], list(result["dropped"])
+    kept, dropped = [], list(result["dropped"]) + new_bullet_drops
     # apply the per-keyword limit in Claude's order (ids end in the original index), show in resume order
     soft = {k["term"].lower() for k in s["jd"].get("keywords", []) if k.get("category") == "soft_skill"}
     by_id = {p["id"]: p for p in s["paragraphs"]}
     budget = [SKILLS_CAP]  # new Skills-line items left, shared by Claude's edits and the fallback
     for c in sorted(result["changes"], key=lambda c: int(c["id"].rsplit("_", 1)[1])):
         before = edits.get(c["target_id"], c["original_text"])
+        c["new_text"], _ = analyzer.fix_spelling(c["new_text"], s["jd"].get("keywords", []))  # the JD's exact spelling
         if _is_skills_list(by_id[c["target_id"]], before):
             _trim_skills_change(c, before, terms, soft, budget)
         adds = [t for t in terms if analyzer.mentions(c["new_text"], t) and not analyzer.mentions(before, t)]
@@ -472,9 +476,9 @@ def _download(p: Path) -> dict:
 
 
 def _jd_terms(s: dict) -> list[str]:
-    """Every job-posting keyword and its variants, for bolding."""
+    """Every job-posting keyword, for bolding (only the JD's exact spelling is bolded; variants never are)."""
     kws = (s.get("jd") or {}).get("keywords", [])
-    return [t for k in kws for t in [k.get("term", ""), *(k.get("variants") or [])] if t and t.strip()]
+    return [t for k in kws for t in [k.get("term", "")] if t and t.strip()]
 
 
 def _file_names(s: dict, edits: dict[str, str]) -> dict:
@@ -492,9 +496,10 @@ def _file_names(s: dict, edits: dict[str, str]) -> dict:
             "from_settings": bool(override)}
 
 
-def _formats() -> tuple[bool, bool, str]:
-    """(pdf, docx, notice) for this export, from the Settings choice and whether a PDF converter exists."""
-    fmt = config.get_file_format()
+def _formats(choice: Optional[str] = None) -> tuple[bool, bool, str]:
+    """(pdf, docx, notice) for this export, from the format chosen at download (else the Settings choice)
+    and whether a PDF converter exists."""
+    fmt = choice or config.get_file_format()
     pdf, docx = fmt in ("pdf", "both"), fmt in ("docx", "both")
     if pdf and not pdf_export.converter():
         return False, True, pdf_export.missing_message() + " Saved as .docx instead."
@@ -534,7 +539,7 @@ def _save_as(kind: str, docx_path: Path, pdf_path: Path, want_pdf: bool, want_do
 def _export_work(s: dict, out_dir: Path, body: ExportIn) -> dict:
     edits = {e.target_id: e.new_text for e in body.accepted}
     font, bold, terms = config.get_doc_font(), config.get_bold_keywords(), _jd_terms(s)
-    want_pdf, want_docx, notice = _formats()
+    want_pdf, want_docx, notice = _formats(body.format)
     names = _file_names(s, edits)
     out: dict = {"applied": len(edits), "format": "pdf" if want_pdf else "docx", "notices": [notice] if notice else []}
     if not names["name_found"]:
@@ -786,7 +791,7 @@ def job_find_jobs(body: SessionIn):
 @app.post("/api/jobs/export")
 def job_export(body: ExportIn):
     s, out_dir = _export_check(body)
-    pdf, docx, _ = _formats()
+    pdf, docx, _ = _formats(body.format)
     plan = []
     for kind, on, name in (("resume", body.include_resume, "resume"), ("cover", bool(body.cover_letter), "cover letter")):
         if on:

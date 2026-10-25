@@ -1,6 +1,7 @@
 import type { Change } from "../../api/types";
 import { get, set, type DiffMode, type Filter } from "../../store/app";
 import { fullText, kwForTerm, matchesFilter, tabLabel, visibleEdits } from "../../store/derive";
+import { hasExact } from "../../lib/keywords";
 import { toast } from "../../store/toasts";
 import { resetJob, setTabTitle } from "../setup/actions";
 
@@ -77,7 +78,7 @@ export function setKwFilter(term: string | null) {
   const s = get(), list = visibleEdits(s);
   if (list.length) scrollToChange(list[0].id);
   else {
-    const k = kwForTerm(s.kws, term), inResume = k && k.res.some((r) => r.test(fullText(s, false)));
+    const k = kwForTerm(s.kws, term), inResume = k && hasExact(k, fullText(s, false));
     toast(inResume ? `“${term}” was already in your resume.` : `No edit adds “${term}”.`);
   }
 }

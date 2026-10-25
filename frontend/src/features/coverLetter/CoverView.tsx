@@ -8,6 +8,7 @@ import { Seg } from "../../ui/Seg";
 import { StatusLine } from "../../ui/StatusLine";
 import { View } from "../../ui/View";
 import { FileLine } from "../review/FileLine";
+import { FormatToggle } from "../review/FormatToggle";
 import { backToReview, cancelCover, doExport, wordCount, writeCover } from "./actions";
 
 const editLetter = (patch: Partial<Letter>) => set((s) => ({ letter: { ...s.letter, ...patch }, coverEdited: true }));
@@ -117,8 +118,8 @@ function LetterSkeleton() {
 
 export function CoverView() {
   const s = useApp();
-  const { view, cover, letter, boldLetterKw, exporting, cvExportStatus, cfg } = s;
-  const word = outFormat(cfg) === "docx" ? ".docx" : "PDF";
+  const { view, cover, letter, boldLetterKw, exporting, cvExportStatus } = s;
+  const word = outFormat(s) === "docx" ? ".docx" : "PDF";
   // no letter yet: start at the first field
   useEffect(() => { if (view === "cover" && !get().cover) setTimeout(() => document.getElementById("cvManager")?.focus({ preventScroll: true }), 120); }, [view]);
   const n = wordCount(letter.paragraphs.join(" "));
@@ -138,6 +139,7 @@ export function CoverView() {
             <label className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] whitespace-nowrap text-ink-2" title="Bold the job's keywords in the downloaded letter">
               <input type="checkbox" id="cvBoldKw" className="size-4 accent-accent" checked={boldLetterKw} onChange={(e) => set({ boldLetterKw: e.target.checked })} /> Bold keywords
             </label>
+            <FormatToggle id="cvFmtSeg" />
             <button type="button" className="btn secondary" id="cvExport" disabled={!cover || !!exporting} onClick={() => void doExport("cover")}>Download letter ({word})</button>
             <button type="button" className="btn" id="bothExport" disabled={!cover || !!exporting} onClick={() => void doExport("both")}>Download both (.zip)</button>
           </div>
