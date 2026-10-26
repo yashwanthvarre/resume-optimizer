@@ -113,6 +113,7 @@ function PopBody({ c }: { c: Change }) {
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="mr-auto text-xs font-semibold tracking-[.04em] text-ink-3 uppercase">{sec}</span>
         {c.source === "add" ? <span className="tag lilac" title={`Claude added ${c.from_input} from work your resume already shows. Skip it if it isn't accurate`}>Added by Claude</span>
+          : c.source === "ask" ? <span className="tag sky" title={`You asked Claude: ${c.from_input}`}>Your request</span>
           : c.from_input ? <span className="tag sky" title={`Added from what you told Claude about ${c.from_input}`}>From your input</span> : null}
         {edited && <span className="tag">Edited by you</span>}
         <span className="ml-1.5 inline-flex items-center gap-0.5">

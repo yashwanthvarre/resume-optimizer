@@ -7,7 +7,7 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "mock")
 import uvicorn, app as appmod
 from ro import analyzer, jd_fetch
 sys.path.insert(0, str(Path(__file__).parent))
-from test_e2e_data import JD, CH, COVER, keyword_decisions, rewrites
+from test_e2e_data import JD, CH, COVER, keyword_decisions, rewrites, instruct_edits
 CANNED = {"record_jd": JD, "record_changes": CH, "record_cover_letter": COVER}
 CANNED["record_jobs"] = {"profile": "Backend engineer, Python/AWS, remote", "jobs": [
     {"title": "Backend Engineer", "company": "Globex", "location": "Remote", "url": "https://jobs.example.test/globex",
@@ -20,6 +20,8 @@ def fake(s, u, tool, mt):
     time.sleep(float(os.environ.get("MOCK_DELAY", "1.5")))  # lets the progress UI be seen
     if tool["name"] == "record_keyword_decisions":
         return keyword_decisions(u)
+    if tool["name"] == "record_instruction_edits":
+        return instruct_edits(u)
     if tool["name"] == "record_rewrites":
         return rewrites(u)
     return CANNED[tool["name"]]

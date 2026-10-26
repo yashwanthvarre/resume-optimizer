@@ -1,4 +1,4 @@
-import type { JustifyResult } from "../../api/types";
+import type { InstructResult, JustifyResult } from "../../api/types";
 import { cancelJob, errMsg, isCancelled, jobProgress, runJob } from "../../lib/jobs";
 import { get, set, st, type Gap } from "../../store/app";
 import { acceptedEdits, defaultGap, gapOf, gapReady, gapTerms, kwForTerm } from "../../store/derive";
@@ -39,8 +39,8 @@ export async function submitGaps() {
   const terms = gapTerms(s).filter((t) => gapReady(s, t));
   if (!terms.length || !s.resume) return;
   const items = terms.map((t) => {
-    const g = gapOf(s, t);
-    return { term: t, mode: g.choice, justification: g.choice === "note" ? g.note.trim() : "", role: g.role };
+    const g = gapOf(s, t), note = g.note.trim();
+    return { term: t, mode: note ? "note" : "add", justification: note, role: g.role };
   });
   set({ gapsStatus: st("Starting…", "info", true) });
   try {
@@ -68,3 +68,27 @@ export async function submitGaps() {
 }
 
 export const stopGaps = () => cancelJob(get().gapsJob);
+
+/** Ask Claude for any change in the user's own words; its edits go straight onto the page like keyword edits. */
+export async function submitAsk() {
+  const s = get(), ask = s.askText.trim();
+  if (!ask || !s.resume || s.askJob) return;
+  set({ askReply: "", askStatus: st("Starting…", "info", true) });
+  try {
+    const d = await runJob<InstructResult>("/api/jobs/instruct", { session_id: s.resume.session_id, instruction: ask, accepted: acceptedEdits(s) }, (job) => {
+      const { current } = jobProgress(job);
+      set({ askJob: job });
+      if (job.status === "running" && current) set({ askStatus: st(`${current.message}…`, "info", true) });
+    });
+    const n = d.changes.length;
+    set({ askReply: d.reply, askStatus: st(), ...(n ? { askText: "" } : {}) });
+    if (n) mergeChanges(d.changes);
+    toast(n ? `Claude made ${n} edit${n === 1 ? "" : "s"}` : "Claude didn't change anything", n ? "ok" : "");
+  } catch (e) {
+    set({ askStatus: isCancelled(e) ? st("Stopped.") : st(errMsg(e), "err") });
+  } finally {
+    set({ askJob: null });
+  }
+}
+
+export const stopAsk = () => cancelJob(get().askJob);

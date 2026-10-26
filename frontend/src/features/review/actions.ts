@@ -1,5 +1,5 @@
 import type { Change } from "../../api/types";
-import { get, set, type DiffMode, type Filter } from "../../store/app";
+import { get, set, st, type DiffMode, type Filter } from "../../store/app";
 import { fullText, kwForTerm, matchesFilter, tabLabel, visibleEdits } from "../../store/derive";
 import { cancelJob } from "../../lib/jobs";
 import { hasExact } from "../../lib/keywords";
@@ -20,7 +20,7 @@ export const scrollToChange = (id: string) =>
 export function openPop(id: string) {
   if (!byId(id)) return;
   cancelJob(get().refineJob);
-  set({ pop: id, editorOpen: false, refine: null, refineOptions: null });
+  set({ pop: id, editorOpen: false, refine: null, refineOptions: null, refineApplied: null });
   scrollToChange(id);
 }
 
@@ -126,9 +126,10 @@ export function mergeChanges(newChanges: Change[]) {
 export function restart() {
   resetJob();
   cancelJob(get().refineJob);
+  cancelJob(get().askJob);
   set({
-    view: "setup", pop: null, refine: null, refineOptions: null, sheet: null, menuOpen: false,
-    gaps: {}, gapExtra: [], gapsSummary: "", cover: null, coverEdited: false, manager: "", why: "", coverStatus: { msg: "", kind: "info" },
+    view: "setup", pop: null, refine: null, refineOptions: null, refineApplied: null, sheet: null, menuOpen: false,
+    gaps: {}, gapExtra: [], gapsSummary: "", askText: "", askReply: "", askStatus: st(), cover: null, coverEdited: false, manager: "", why: "", coverStatus: { msg: "", kind: "info" },
     exported: false, analyzeStatus: { msg: "", kind: "info" },
   });
   setTabTitle("");

@@ -219,14 +219,16 @@ REFINE_TOOL = {
                     "required": ["text", "note"],
                 },
             },
+            "elsewhere": {"type": "boolean", "description": "true when the instruction needs changes outside this line "
+                                                            "(another role or section, a new bullet elsewhere); then "
+                                                            "options is empty"},
         },
         "required": ["options"],
     },
 }
 
 REFINE_RULES = """Rules — follow all of them:
-1. Follow the candidate's instruction: it says what they don't like about the line. Give 3 options that each
-   fix it a different way (e.g. a different verb, where the keyword sits, a shorter or tighter version).
+{first}
 2. Keep every keyword listed under "Keep these keywords", written exactly as given (same capitals and
    punctuation, singular or plural is fine), unless the instruction asks to drop one. ATS matching is literal.
 3. Use only facts from the resume or the candidate's notes. No new numbers, tools, team sizes, scope,
@@ -234,7 +236,56 @@ REFINE_RULES = """Rules — follow all of them:
 4. Keep roughly the line's length (≤ ~1.2x) unless the instruction asks for shorter or longer, and match the
    tense and voice of the surrounding bullets. Start bullets with a strong action verb.
 5. Keep any tab characters (\\t). Write the line only: no bullet symbol, no quotes, no line breaks.
-6. Each option must read differently from the current line and from the other options."""
+{last}
+7. If the instruction asks for changes outside this line (add or copy the keyword to another role or section,
+   write a new bullet elsewhere), set elsewhere to true and leave options empty: another step makes those edits."""
+REFINE_ONE = (  # rules 1 and 6: one direct rewrite, or 3 options to pick from
+    {"first": "1. Do exactly what the candidate's instruction asks: it is a direct edit, not a request for ideas.\n"
+              "   Change what it asks for and keep the rest of the line as it is.",
+     "last": "6. The rewrite must read differently from the current line."},
+    {"first": "1. Follow the candidate's instruction: it says what they don't like about the line. Give 3 options that each\n"
+              "   fix it a different way (e.g. a different verb, where the keyword sits, a shorter or tighter version).",
+     "last": "6. Each option must read differently from the current line and from the other options."})
+
+INSTRUCT_TOOL = {
+    "name": "record_instruction_edits",
+    "description": "Record the resume edits that carry out the candidate's request.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reply": {"type": "string", "description": "1-2 sentences to the candidate: what you changed and where, or "
+                                                       "why you changed nothing"},
+            "changes": {
+                "type": "array",
+                "description": "The edits that carry out the request. Each paragraph at most once.",
+                "items": CHANGES_TOOL["input_schema"]["properties"]["changes"]["items"],
+            },
+            "new_bullets": KEYWORDS_TOOL["input_schema"]["properties"]["new_bullets"],
+        },
+        "required": ["reply", "changes"],
+    },
+}
+
+INSTRUCT_RULES = """Rules — follow all of them:
+1. Do what the candidate asks, and only that: edit just the paragraphs the request is about. If it names a role,
+   section or line, stay there; if it is general ("tighten my bullets"), pick the lines it helps most.
+2. What the candidate tells you about their own experience is true: you may use those facts. Otherwise use only
+   facts from the resume. Never inflate: no numbers, tools, team sizes, scope, seniority or outcomes that the
+   resume or the request doesn't state.
+3. Resume text below already includes the candidate's approved edits. Build on that text exactly: keep the JD
+   keywords each line already has (ATS matching is literal) unless the request asks to drop one, and write any
+   JD keyword exactly as given in `term`.
+4. Each change edits ONE existing paragraph (target_id), new_text is its COMPLETE new text, reason says in one
+   sentence what you changed. To add a new bullet, use `new_bullets` (after_id is an existing bullet in that role).
+5. Preserve structure: leading bullet symbols, tab characters (\\t), and "Company | Title | Dates" header lines.
+   Don't edit names, contact details, dates, employers, titles, schools or headings unless the request asks.
+6. Match the tense, voice and length of the surrounding bullets, start bullets with a strong action verb.
+7. "Add <keyword> to <role>" means ONE new bullet under that role (`new_bullets`, after_id = that role's last
+   bullet) that carries the keyword, built from that role's own work. "Keep it in <section>" means leave that
+   paragraph as it is. Match a role loosely ("IT Resources exp" is the role at IT Resources). If no role or
+   more than one role matches, or nothing in that role supports the keyword, change nothing and say so in `reply`.
+8. If the request can't be done honestly (it asks you to invent experience) or is unclear, change nothing and
+   say why in `reply`. Never ask a question: the candidate isn't available."""
 
 KEYWORD_RULES = """Rules — follow all of them:
 0. The candidate is not available for questions: never ask them anything. They have already decided they want
@@ -668,8 +719,9 @@ def decide_keywords(jd: dict, paragraphs: list[dict], edits: dict[str, str], ite
 
 
 def refine_line(jd: dict, paragraphs: list[dict], edits: dict[str, str], target_id: str, line: str, original: str,
-                keywords: list[str], instruction: str, notes: list[str] | None = None) -> dict:
-    """Three rewrites of one line of an edit (a bullet, or a new bullet under it) the way the candidate asks."""
+                keywords: list[str], instruction: str, notes: list[str] | None = None, count: int = 3) -> dict:
+    """Three rewrites of one line of an edit (a bullet, or a new bullet under it) the way the candidate asks;
+    count=1 carries the instruction out as a single rewrite."""
     by_term = {k.get("term", "").lower(): k for k in jd.get("keywords", [])}
     kws = [by_term.get(t.lower(), {"term": t}) for t in keywords]
     extras = ("\n\nThe candidate's own notes (true; you may use these facts):\n" + "\n".join(f"- {n}" for n in notes)) if notes else ""
@@ -680,15 +732,20 @@ def refine_line(jd: dict, paragraphs: list[dict], edits: dict[str, str], target_
         f"<line>{BULLET_LEAD.sub('', line).strip()}</line>\n"
         + (f"<original>{BULLET_LEAD.sub('', original).strip()}</original> (the candidate's own wording, before any edit)\n" if original else "")
         + "Keep these keywords: " + (json.dumps(kws, ensure_ascii=False) if kws else "(none)") +
-        f"\n\n<instruction>\n{instruction.strip()[:1000]}\n</instruction>\n\n" + REFINE_RULES +
-        "\n\nWrite the 3 options."
+        f"\n\n<instruction>\n{instruction.strip()[:1000]}\n</instruction>\n\n" + REFINE_RULES.format(**REFINE_ONE[count != 1]) +
+        ("\n\nWrite the 1 rewrite." if count == 1 else "\n\nWrite the 3 options.")
     )
-    return _call_tool(SYSTEM, user, REFINE_TOOL, 2000)
+    if count != 1:
+        return _call_tool(SYSTEM, user, REFINE_TOOL, 2000)
+    one = json.loads(json.dumps(REFINE_TOOL))
+    one["description"] = "Record the line rewritten to carry out the candidate's instruction."
+    one["input_schema"]["properties"]["options"]["description"] = "Exactly 1 rewrite of the line"
+    return _call_tool(SYSTEM, user, one, 1000)
 
 
 def validate_rewrites(raw: dict, line: str, paragraphs: list[dict], jd: dict, keywords: list[str],
-                      known_text: str = "") -> dict:
-    """Up to 3 clean options for one line: the line's bullet symbol kept, the JD's spelling, flags for new numbers,
+                      known_text: str = "", limit: int = 3) -> dict:
+    """Up to `limit` clean options for one line: the line's bullet symbol kept, the JD's spelling, flags for new numbers,
     a lost keyword or a much longer line; empty, unchanged and duplicate options dropped."""
     lead = BULLET_LEAD.match(line).group(0)
     known = {n.strip("., ") for n in _NUM.findall("\n".join(p["text"] for p in paragraphs) + "\n" + line + "\n" + known_text)}
@@ -697,7 +754,7 @@ def validate_rewrites(raw: dict, line: str, paragraphs: list[dict], jd: dict, ke
         text = re.sub(r"\s*\n\s*", " ", BULLET_LEAD.sub("", (o.get("text") or "").strip())).strip().strip('"“”')
         text, _ = fix_spelling(text, jd.get("keywords", []))
         why = ("is empty" if not text else "doesn't change anything" if text == cur else
-               "repeats another option" if text.lower() in seen else "is over the limit of 3" if len(out) >= 3 else "")
+               "repeats another option" if text.lower() in seen else f"is over the limit of {limit}" if len(out) >= limit else "")
         if why:
             dropped.append(f"option {len(out) + len(dropped) + 1}: {why}")
             continue
@@ -713,6 +770,28 @@ def validate_rewrites(raw: dict, line: str, paragraphs: list[dict], jd: dict, ke
             warnings.append("Noticeably longer than the current line — check it still fits on the page.")
         out.append({"text": lead + text, "note": (o.get("note") or "").strip(), "warnings": warnings})
     return {"options": out, "dropped": dropped}
+
+
+def instruct_edits(jd: dict, paragraphs: list[dict], edits: dict[str, str], instruction: str,
+                   notes: list[str] | None = None, focus: dict | None = None) -> dict:
+    """Edits anywhere in the resume that carry out the candidate's free-form request. focus = the line the candidate
+    asked from ({target_id, line, keywords}), so "this keyword" and "it" have something to point at."""
+    extras = ("\n\nThe candidate's own notes (true; you may use these facts):\n" + "\n".join(f"- {n}" for n in notes)) if notes else ""
+    if focus and focus.get("target_id"):
+        p = next((x for x in paragraphs if x["id"] == focus["target_id"]), {})
+        kws = focus.get("keywords") or []
+        extras += (f"\n\nThe candidate asked this while looking at a line in paragraph {focus['target_id']} ({p.get('section', '')}):\n"
+                   f"<line>{BULLET_LEAD.sub('', focus.get('line', '')).strip()}</line>\n"
+                   + (f"\"This keyword\" and \"it\" mean: {', '.join(kws)}. " if kws else "")
+                   + "Leave that line as it is unless the request asks to change it.")
+    user = (
+        f"Job: {jd.get('role', '')} at {jd.get('company', '')}. {jd.get('summary', '')}\n"
+        "JD keywords: " + json.dumps([k.get("term", "") for k in jd.get("keywords", [])], ensure_ascii=False) +
+        "\n\nResume paragraphs (id, section/kind, JSON-quoted current text):\n" + "\n".join(_para_lines(paragraphs, edits)) + extras +
+        f"\n\nThe candidate's request:\n<request>\n{instruction.strip()[:2000]}\n</request>\n\n" + INSTRUCT_RULES +
+        "\n\nWrite the edits."
+    )
+    return _call_tool(SYSTEM, user, INSTRUCT_TOOL, 6000)
 
 
 BULLET_LEAD = re.compile(r"^[\s•●▪■◦‣∙·\-–*]*")

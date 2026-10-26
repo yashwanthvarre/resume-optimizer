@@ -20,7 +20,7 @@ export type DlFormat = "pdf" | "docx";
  *  add = Claude researches the keyword and writes it in from the resume · note = the user's quick idea
  *  skip = not for this job: never sent · added = an edit carrying it is on the page · missed = no line could take it */
 export interface Gap {
-  choice: "add" | "note" | "skip";
+  choice: "add" | "skip"; // with a note, "add" works from it
   note: string;
   role: string;
   status: "draft" | "added" | "missed";
@@ -100,6 +100,7 @@ export interface AppState {
   refineJob: Job | null;
   refineStatus: Status;
   refineOptions: RefineOption[] | null;
+  refineApplied: RefineOption | null; // a direct rewrite Claude flagged: shown for a yes/no instead of going straight in
 
   // keyword sheets
   sheet: null | "keywords" | "gaps";
@@ -109,6 +110,10 @@ export interface AppState {
   gapsSummary: string;
   gapsJob: Job | null;
   gapsStatus: Status;
+  askText: string; // a change in the user's own words, for Claude to make anywhere in the resume
+  askJob: Job | null;
+  askStatus: Status;
+  askReply: string;
 
   // cover letter
   cover: CoverLetter | null;
@@ -144,8 +149,9 @@ export const initialState: AppState = {
   analysis: null, kws: [], kwAll: [], selected: new Set(), edits: {}, filter: "all", kwFilter: null, pop: null, editorOpen: false,
   exported: false, showMarks: true, diffMode: storedDiffMode(), noticeOpen: true, menuOpen: false, addedNow: { ids: [], at: 0 },
   exportStatus: st(), exporting: "", dlFormat: null,
-  refine: null, refineAsk: "", refineJob: null, refineStatus: st(), refineOptions: null,
+  refine: null, refineAsk: "", refineJob: null, refineStatus: st(), refineOptions: null, refineApplied: null,
   sheet: null, gapFocus: { terms: [], at: 0 }, gaps: {}, gapExtra: [], gapsSummary: "", gapsJob: null, gapsStatus: st(),
+  askText: "", askJob: null, askStatus: st(), askReply: "",
   cover: null, letter: emptyLetter, coverEdited: false, tone: "warm", manager: "", why: "", coverJob: null, coverStatus: st(),
   coverFormOpen: true, boldLetterKw: false, cvExportStatus: st(),
 };

@@ -6,11 +6,11 @@ import { set, useApp } from "../../store/app";
 import { ClaudeIcon } from "../../ui/ClaudeIcon";
 import { StatusLine } from "../../ui/StatusLine";
 import { Diff, usePosition } from "./EditPopover";
-import { closeRefine, pickRefine, refineLines, stopRefine, submitRefine } from "./refine";
+import { applyRefine, closeRefine, pickRefine, refineLines, stopRefine, submitRefine } from "./refine";
 
 const IDEAS = ["The keyword feels forced here", "Make it shorter", "Use a stronger verb", "Put the keyword earlier"];
 
-/** Ask Claude about one highlighted line: say what's wrong, get 3 rewrites, pick one. */
+/** Ask Claude about one highlighted line: tell it what to change and it applies it, or get 3 rewrites and pick one. */
 export function RefinePopover() {
   const s = useApp();
   const sheet = useMedia(SHEET_QUERY);
@@ -47,7 +47,7 @@ export function RefinePopover() {
 }
 
 function RefineBody() {
-  const { refine: r, refineAsk: ask, refineJob: job, refineStatus, refineOptions: options } = useApp();
+  const { refine: r, refineAsk: ask, refineJob: job, refineStatus, refineOptions: options, refineApplied: applied } = useApp();
   const ref = useAutosize(ask);
   useEffect(() => { ref.current?.focus(); }, [ref, r?.id, r?.line]);
   const got = r && refineLines(r.id);
@@ -62,9 +62,14 @@ function RefineBody() {
       </div>
       <p className="border-l-2 border-line-strong pl-2.5 text-ink-2" id="refineLine">{line.replace(/^[\s•●▪■◦‣∙·\-–*]+/, "")}</p>
       <textarea ref={ref} id="refineAsk" className="field min-h-16 resize-none overflow-hidden" rows={2} value={ask} disabled={busy}
-        aria-label="What should Claude change about this line?" placeholder="What isn't right? e.g. the keyword feels forced, or make it shorter"
+        aria-label="What should Claude change about this line?" placeholder="Tell Claude what to change — press Enter to apply"
         onChange={(e) => set({ refineAsk: e.target.value })}
-        onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submitRefine(); } }} />
+        onKeyDown={(e) => {
+          // Enter applies, Ctrl/Cmd+Enter asks for 3 options, Shift+Enter is a new line
+          if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          void (e.ctrlKey || e.metaKey ? submitRefine() : applyRefine());
+        }} />
       {!ask.trim() && !busy && (
         <div className="flex flex-wrap gap-1.5">
           {IDEAS.map((x) => <button key={x} type="button" className="chip out" onClick={() => set({ refineAsk: x })}>{x}</button>)}
@@ -72,11 +77,25 @@ function RefineBody() {
       )}
       <div className="flex flex-wrap items-center gap-1.5">
         {busy ? <button type="button" className="btn secondary sm" id="refineStop" onClick={stopRefine}>Stop</button>
-          : <button type="button" className="btn sm" id="refineGo" disabled={!ask.trim()} onClick={() => void submitRefine()}>{options ? "Try again" : "Get 3 options"}</button>}
+          : <>
+            <button type="button" className="btn sm" id="refineApply" disabled={!ask.trim()} title="Enter" onClick={() => void applyRefine()}><ClaudeIcon />Apply with Claude</button>
+            <button type="button" className="btn secondary sm" id="refineGo" disabled={!ask.trim()} title="Ctrl+Enter" onClick={() => void submitRefine()}>{options ? "Try again" : "Get 3 options"}</button>
+          </>}
         <button type="button" className="btn ghost sm" onClick={closeRefine}>Cancel</button>
         <StatusLine s={refineStatus} className="!m-0" />
       </div>
       <AnimatePresence>
+        {applied && (
+          <motion.div className="grid gap-1.5 border-t border-line pt-2.5" id="refineApplied" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            <div className="text-xs font-semibold tracking-[.04em] text-ink-3 uppercase">Check this before it goes in</div>
+            <Diff a={line} b={applied.text} mode="inline" />
+            {applied.warnings.map((w) => <span key={w} className="warn !m-0 block">{w}</span>)}
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" className="btn sm" id="refineUse" onClick={() => pickRefine(applied.text)}>Use it</button>
+              <button type="button" className="btn ghost sm" id="refineDiscard" onClick={() => set({ refineApplied: null })}>Discard</button>
+            </div>
+          </motion.div>
+        )}
         {options && (
           <motion.div className="grid gap-1.5 border-t border-line pt-2.5" id="refineOptions" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             <div className="text-xs font-semibold tracking-[.04em] text-ink-3 uppercase">Pick one to use it</div>

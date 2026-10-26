@@ -114,6 +114,14 @@ export interface RefineOption {
 export interface RefineResult {
   options: RefineOption[];
   dropped: string[];
+  instruct?: InstructResult; // the request reached beyond the line (e.g. "add this keyword to my X role"): edits anywhere
+}
+
+/** Edits that carry out a free-form request, from /api/jobs/instruct. */
+export interface InstructResult {
+  reply: string;
+  changes: Change[];
+  dropped: string[];
 }
 
 export interface CoverLetter {

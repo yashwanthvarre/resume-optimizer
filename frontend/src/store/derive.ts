@@ -95,7 +95,7 @@ export function gapTerms(s: AppState) {
 
 export function gapReady(s: AppState, term: string) {
   const g = gapOf(s, term);
-  return gapStatus(s, term) !== "added" && g.choice !== "skip" && !(g.choice === "note" && !g.note.trim());
+  return gapStatus(s, term) !== "added" && g.choice !== "skip";
 }
 
 export function gapReason(s: AppState, k: Kw): { text: string; change?: string } {

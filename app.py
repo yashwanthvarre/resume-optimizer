@@ -146,6 +146,16 @@ class RefineIn(BaseModel):
     keywords: list[str] = []    # the keywords the edit added: kept in every option
     instruction: str
     accepted: list[Edit] = []
+    count: int = 3              # 1 = apply the instruction directly; 3 = options to pick from
+
+
+class InstructIn(BaseModel):
+    session_id: str
+    instruction: str            # the candidate's request, in their own words
+    accepted: list[Edit] = []
+    focus_target_id: str = ""   # the line the request was asked from (the Review popover), if any
+    focus_line: str = ""
+    focus_keywords: list[str] = []
 
 
 class ExportIn(BaseModel):
@@ -724,22 +734,79 @@ def _refine_check(body: RefineIn) -> dict:
 def _refine_work(s: dict, body: RefineIn) -> dict:
     edits = {e.target_id: e.new_text for e in body.accepted}
     notes = [i["justification"] for i in s.get("justifications", []) if i.get("justification")]
+    n = 1 if body.count == 1 else 3
     try:
-        emit("rewrite", "running", f"Asking {_engine_label()} for 3 rewrites")
+        emit("rewrite", "running", f"Asking {_engine_label()} " + ("to make your change" if n == 1 else "for 3 rewrites"))
         raw = analyzer.refine_line(s["jd"], s["paragraphs"], edits, body.target_id, body.line, body.original,
-                                   body.keywords, body.instruction, notes)
+                                   body.keywords, body.instruction, notes, count=n)
     except analyzer.AIError as e:
         _err(502, str(e))
     check()
-    emit("rewrite", "done", "Got the rewrites")
-    emit("check", "running", "Checking the rewrites against your resume")
-    result = analyzer.validate_rewrites(raw, body.line, s["paragraphs"], s["jd"], body.keywords, "\n".join(notes))
+    if raw.get("elsewhere"):  # the request reaches other lines (e.g. "add this keyword to my X role"): edit the resume
+        emit("rewrite", "done", "This needs changes beyond this line")
+        ib = InstructIn(session_id=body.session_id, instruction=body.instruction, accepted=body.accepted,
+                        focus_target_id=body.target_id, focus_line=body.line, focus_keywords=body.keywords)
+        return {"options": [], "dropped": [], "instruct": _instruct_work(s, ib)}
+    emit("rewrite", "done", "Got the rewrite" if n == 1 else "Got the rewrites")
+    emit("check", "running", "Checking the rewrite against your resume" if n == 1 else "Checking the rewrites against your resume")
+    result = analyzer.validate_rewrites(raw, body.line, s["paragraphs"], s["jd"], body.keywords, "\n".join(notes), limit=n)
     if not result["options"]:
         _err(502, "Claude didn't return a usable rewrite. Try again, or say it differently.")
     flagged = [w for o in result["options"] for w in o["warnings"]]
-    emit("check", "done", f"{_plural(len(result['options']), 'option')} ready" + (f", {len(flagged)} to verify" if flagged else ""),
+    emit("check", "done", ("Rewrite ready" if n == 1 else f"{_plural(len(result['options']), 'option')} ready") + (f", {len(flagged)} to verify" if flagged else ""),
          detail=[f"Dropped {d}" for d in result["dropped"]] + flagged or None)
     return result
+
+
+def _instruct_check(body: InstructIn) -> dict:
+    s = _session(body.session_id)
+    if not s.get("jd"):
+        _err(400, "Analyze the job first.")
+    if not body.instruction.strip():
+        _err(400, "Tell Claude what to change.")
+    return s
+
+
+INSTRUCT_LIMIT = 8  # edits per request: a request is about a few lines, not a rewrite
+
+
+def _instruct_work(s: dict, body: InstructIn) -> dict:
+    ask = body.instruction.strip()
+    edits = {e.target_id: e.new_text for e in body.accepted}
+    notes = [i["justification"] for i in s.get("justifications", []) if i.get("justification")]
+    try:
+        emit("edit", "running", f"Asking {_engine_label()} to make your change")
+        focus = {"target_id": body.focus_target_id, "line": body.focus_line, "keywords": body.focus_keywords}
+        raw = analyzer.instruct_edits(s["jd"], s["paragraphs"], edits, ask, notes, focus)
+    except analyzer.AIError as e:
+        _err(502, str(e))
+    check()
+    emit("edit", "done", (raw.get("reply") or "").strip() or "Got the edits")
+    emit("check", "running", "Checking the edits against your resume")
+    dropped = analyzer.merge_new_bullets(raw, s["paragraphs"], edits)
+    result = analyzer.validate_changes(raw, s["paragraphs"], known_text=ask + "\n" + "\n".join(notes),
+                                       id_prefix=f"a{secrets.token_hex(2)}_", limit=INSTRUCT_LIMIT, current=edits)
+    dropped += result["dropped"]
+    kws = s["jd"].get("keywords", [])
+    kept = []
+    for c in result["changes"]:
+        before = edits.get(c["target_id"], c["original_text"])
+        c["new_text"], _ = analyzer.fix_spelling(c["new_text"], kws)  # the JD's exact spelling
+        if c["new_text"].strip() == before.strip():
+            dropped.append(f"{c['target_id']}: doesn't change anything")
+            continue
+        lost = [k["term"] for k in kws if analyzer.mentions(before, k["term"]) and not analyzer.mentions(c["new_text"], k["term"])]
+        if lost:
+            c["warnings"].append(f"Drops {', '.join(lost)}, which this line had — check that's intended.")
+        # the keywords this line carries after the edit: ones it had stay marked, new ones show as added
+        c["jd_keywords"] = [k["term"] for k in kws if analyzer.mentions(c["new_text"], k["term"])]
+        c["source"], c["from_input"] = "ask", ask[:200]
+        kept.append(c)
+    reply = (raw.get("reply") or "").strip() or ("Made the change." if kept else "Claude didn't change anything.")
+    flagged = [w for c in kept for w in c["warnings"]]
+    emit("check", "done", f"{_plural(len(kept), 'edit')} ready" + (f", {len(flagged)} to verify" if flagged else ""),
+         detail=[f"Dropped {d}" for d in dropped] + flagged or None)
+    return {"reply": reply, "changes": kept, "dropped": dropped}
 
 
 def _find_jobs_work(s: dict) -> dict:
@@ -785,6 +852,11 @@ def justify_keywords(body: JustifyIn):
 @app.post("/api/refine_change")
 def refine_change(body: RefineIn):
     return _refine_work(_refine_check(body), body)
+
+
+@app.post("/api/instruct")
+def instruct(body: InstructIn):
+    return _instruct_work(_instruct_check(body), body)
 
 
 @app.post("/api/export")
@@ -834,6 +906,13 @@ def job_refine(body: RefineIn):
     s = _refine_check(body)
     plan = [("rewrite", "Rewrite the line"), ("check", "Honesty checks")]
     return _job_out(jobs.start("refine_change", "Rewrite a line", plan, lambda: _refine_work(s, body)))
+
+
+@app.post("/api/jobs/instruct")
+def job_instruct(body: InstructIn):
+    s = _instruct_check(body)
+    plan = [("edit", "Make the change"), ("check", "Honesty checks")]
+    return _job_out(jobs.start("instruct", "Change the resume", plan, lambda: _instruct_work(s, body)))
 
 
 @app.post("/api/jobs/find_jobs")

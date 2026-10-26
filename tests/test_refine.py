@@ -8,13 +8,15 @@ from fastapi.testclient import TestClient
 import app as appmod
 from ro import analyzer
 sys.path.insert(0, str(Path(__file__).parent))
-from test_e2e_data import JD, CH, COVER, JD_TEXT, rewrites
+from test_e2e_data import JD, CH, COVER, JD_TEXT, rewrites, instruct_edits
 
-prompts, calls, OVERRIDE = {}, [], []
+prompts, calls, OVERRIDE, IOVERRIDE = {}, [], [], []
 def fake(s, u, tool, mt):
     prompts[tool["name"]] = u; calls.append(tool["name"])
     if tool["name"] == "record_rewrites":
         return OVERRIDE.pop() if OVERRIDE else rewrites(u)
+    if tool["name"] == "record_instruction_edits":
+        return IOVERRIDE.pop() if IOVERRIDE else instruct_edits(u)
     return {"record_jd": JD, "record_changes": CH, "record_cover_letter": COVER}[tool["name"]]
 analyzer._call_tool = fake
 
@@ -92,4 +94,41 @@ for _ in range(100):
     time.sleep(0.05)
 assert snap["status"] == "done" and len(snap["result"]["options"]) == 3, snap
 print("ok: new bullet + job endpoint")
+
+# ---- count=1: the instruction carried out directly, as one rewrite, with the same checks
+n0 = len(calls)
+d = c.post("/api/refine_change", json=body(count=1, instruction="use a stronger verb"))
+assert d.status_code == 200, d.text
+d = d.json()
+assert calls[n0:] == ["record_rewrites"], calls[n0:]
+u = prompts["record_rewrites"]
+assert "Write the 1 rewrite." in u and "direct edit" in u and "Give 3 options" not in u and "Never inflate" in u, u[-900:]
+assert len(d["options"]) == 1 and d["options"][0]["text"].startswith(lead) and not d["options"][0]["warnings"], d
+OVERRIDE.append({"options": [{"text": "Built it for 40 teams", "note": "a"}, {"text": "Built it twice", "note": "b"}]})
+d = c.post("/api/refine_change", json=body(count=1)).json()
+assert [o["text"] for o in d["options"]] == [lead + "Built it for 40 teams"], d    # only 1 kept, still flagged
+assert any("40" in w for w in d["options"][0]["warnings"]) and any("limit of 1" in x for x in d["dropped"]), d
+print("ok: direct rewrite (count=1)")
+
+# ---- a request that reaches another role ("add this keyword in X, keep it in skills"): edits made by the instruct step
+ASK = "Add this keyword in the Acme exp and keep the keyword in skills section"
+IOVERRIDE.append({"reply": f"Added a bullet with {kw} under your Acme role; your Skills line stays as it is.", "changes": [],
+                  "new_bullets": [{"after_id": "p8", "text": f"Tracked {kw} on the orders service", "jd_keywords": [kw]}]})
+n0 = len(calls)
+d = c.post("/api/refine_change", json=body(count=1, instruction=ASK))
+assert d.status_code == 200, d.text
+d = d.json()
+assert calls[n0:] == ["record_rewrites", "record_instruction_edits"], calls[n0:]
+assert "elsewhere" in prompts["record_rewrites"], "the rewrite step is told it can hand off"
+u = prompts["record_instruction_edits"]
+assert ASK in u and "paragraph p7" in u and f'"This keyword" and "it" mean: {kw}' in u and "Leave that line as it is" in u, u[-900:]
+assert d["options"] == [] and d["instruct"]["reply"].startswith("Added"), d
+[nb] = d["instruct"]["changes"]
+assert nb["target_id"] == "p8" and nb["new_text"].split("\n")[-1].endswith(f"Tracked {kw} on the orders service"), nb
+assert kw in nb["jd_keywords"] and nb["source"] == "ask", nb
+assert not any(x["target_id"] == "p7" for x in d["instruct"]["changes"]), "the hovered line is kept"
+IOVERRIDE.append({"reply": "Your resume has no role at Initech, so I didn't add it.", "changes": []})
+d = c.post("/api/refine_change", json=body(count=1, instruction="add this keyword to my Initech role")).json()
+assert d["instruct"]["changes"] == [] and "Initech" in d["instruct"]["reply"], d
+print("ok: request beyond the line -> edits elsewhere")
 print("ALL REFINE TESTS PASSED")
