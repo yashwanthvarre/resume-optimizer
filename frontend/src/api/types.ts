@@ -104,6 +104,18 @@ export interface JustifyResult {
   changes: Change[];
 }
 
+/** One of Claude's rewrites of a line, from /api/jobs/refine_change. */
+export interface RefineOption {
+  text: string;
+  note: string;
+  warnings: string[];
+}
+
+export interface RefineResult {
+  options: RefineOption[];
+  dropped: string[];
+}
+
 export interface CoverLetter {
   greeting: string;
   paragraphs: string[];

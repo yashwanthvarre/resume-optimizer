@@ -10,6 +10,7 @@
   --color-sky-bg: #e7f0fa; --color-sky: #2a5f95;
   --color-butter-bg: #fdf4d8; --color-butter: #7a5b00;
   --color-lilac-bg: #f1ebfa; --color-lilac: #6a4a9c;
+  --color-claude: #d97757;
   --font-sans: "Figtree", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   --font-doc: var(--doc-font);
   --radius-card: 12px; --radius-ctl: 8px;
@@ -131,12 +132,28 @@ body.keep-font { --doc-font: Calibri, Carlito, "Segoe UI", Arial, sans-serif; --
   .page .pp.edit.off.marked { text-decoration: underline dotted #9aa3ad; text-underline-offset: 3px; text-decoration-thickness: 1px; }
   .page .pp.edit.marked:not(.quiet) { box-shadow: -3px 0 0 #cfdfee; }
   .page .pp.edit.current { background: #eef4fb; box-shadow: -3px 0 0 var(--color-sky); }
+  /* what an accepted edit wrote: green; the keyword it was made for, stronger. Screen-only, like the cues above */
+  .page mark.chg { color: inherit; background: var(--color-sage-bg); border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .page mark.chg.kw { background: #cbe7d4; box-shadow: inset 0 -2px 0 #6fae85; }
+  .page .chg-grp { position: relative; }
+  .page .ask-at { position: relative; display: inline-block; width: 0; height: 1em; vertical-align: top; text-indent: 0; }
+  .page .ask { position: absolute; left: 1px; top: -.95em; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--color-line-strong);
+    background: var(--color-paper); color: var(--color-claude); box-shadow: var(--shadow-2); cursor: pointer; opacity: 0; pointer-events: none; transform: scale(.85);
+    transition: opacity .15s, transform .15s; z-index: 2; }
+  .page .chg-grp:hover .ask, .page .ask:focus-visible, .page .pp.edit.current .ask, .page .pp.edit:focus-within .ask { opacity: 1; pointer-events: auto; transform: none; }
+  .page .ask:hover { background: #fbefe9; }
+  .page .ask:focus-visible { outline: none; box-shadow: var(--ring); }
   .page .pp.edit.flagged.marked::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #d9a600; margin-left: 6px; vertical-align: 2px; }
 
   .diff { font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
   .diff del { background: var(--color-rose-bg); color: var(--color-rose); text-decoration: line-through; border-radius: 3px; padding: 0 1px; }
   .diff ins { background: var(--color-sage-bg); color: var(--color-sage); text-decoration: none; border-radius: 3px; padding: 0 1px; }
   .diff del + ins, .diff ins + del { margin-left: .3em; }
+
+  .refine-opt { display: grid; gap: 4px; text-align: left; font: inherit; color: inherit; background: var(--color-canvas); border: 1px solid var(--color-line); border-radius: var(--radius-ctl);
+    padding: 8px 10px; cursor: pointer; transition: border-color .15s, background .15s; }
+  .refine-opt:hover { border-color: var(--color-accent); background: var(--color-paper); }
+  .refine-opt:focus-visible { outline: none; box-shadow: var(--ring); }
 
   /* cover letter: inputs that read as the letter itself */
   .page.letter { font-size: calc(var(--doc-size) + 1px); line-height: 1.6; padding: 60px 72px; }
@@ -184,6 +201,7 @@ body.keep-font { --doc-font: Calibri, Carlito, "Segoe UI", Arial, sans-serif; --
 @media (pointer: coarse) {
   .btn, select.field, input.field { min-height: 44px; }
   .chip { min-height: 40px; display: inline-flex; align-items: center; }
+  .page .ask { width: 30px; height: 30px; top: -1.3em; }
   .seg button { min-height: 38px; }
 }
 @media (max-height: 520px) { .topbar, .doc-bar { position: static !important; } .sheet { top: 0; } }
@@ -200,5 +218,7 @@ body.keep-font { --doc-font: Calibri, Carlito, "Segoe UI", Arial, sans-serif; --
   .page { box-shadow: none; border: 0; padding: 0; max-width: none; margin-top: 10px; }
   .page .pp.edit { background: none !important; box-shadow: none !important; text-decoration: none !important; }
   .page .pp.flagged::after { display: none !important; }
+  .page mark.chg { background: none !important; box-shadow: none !important; }
+  .page .ask-at { display: none !important; }
   .lt { border: 0 !important; }
 }

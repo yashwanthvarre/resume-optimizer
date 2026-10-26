@@ -138,6 +138,16 @@ class JustifyIn(BaseModel):
     accepted: list[Edit] = []
 
 
+class RefineIn(BaseModel):
+    session_id: str
+    target_id: str
+    line: str                   # the line to rewrite, as it reads now
+    original: str = ""          # that line before any edit; "" for a new bullet
+    keywords: list[str] = []    # the keywords the edit added: kept in every option
+    instruction: str
+    accepted: list[Edit] = []
+
+
 class ExportIn(BaseModel):
     session_id: str
     accepted: list[Edit]
@@ -698,6 +708,40 @@ def clone_resume(body: SessionIn):
     return d
 
 
+def _refine_check(body: RefineIn) -> dict:
+    s = _session(body.session_id)
+    if not s.get("jd"):
+        _err(400, "Analyze the job first.")
+    if not any(p["id"] == body.target_id for p in s["paragraphs"]):
+        _err(400, "That line isn't in your resume.")
+    if not body.line.strip():
+        _err(400, "That line is empty.")
+    if not body.instruction.strip():
+        _err(400, "Tell Claude what to change about this line.")
+    return s
+
+
+def _refine_work(s: dict, body: RefineIn) -> dict:
+    edits = {e.target_id: e.new_text for e in body.accepted}
+    notes = [i["justification"] for i in s.get("justifications", []) if i.get("justification")]
+    try:
+        emit("rewrite", "running", f"Asking {_engine_label()} for 3 rewrites")
+        raw = analyzer.refine_line(s["jd"], s["paragraphs"], edits, body.target_id, body.line, body.original,
+                                   body.keywords, body.instruction, notes)
+    except analyzer.AIError as e:
+        _err(502, str(e))
+    check()
+    emit("rewrite", "done", "Got the rewrites")
+    emit("check", "running", "Checking the rewrites against your resume")
+    result = analyzer.validate_rewrites(raw, body.line, s["paragraphs"], s["jd"], body.keywords, "\n".join(notes))
+    if not result["options"]:
+        _err(502, "Claude didn't return a usable rewrite. Try again, or say it differently.")
+    flagged = [w for o in result["options"] for w in o["warnings"]]
+    emit("check", "done", f"{_plural(len(result['options']), 'option')} ready" + (f", {len(flagged)} to verify" if flagged else ""),
+         detail=[f"Dropped {d}" for d in result["dropped"]] + flagged or None)
+    return result
+
+
 def _find_jobs_work(s: dict) -> dict:
     text = "\n".join(p["text"] for p in s["paragraphs"] if p["text"].strip())
     emit("profile", "running", f"Reading {s['file_name']}")
@@ -736,6 +780,11 @@ def cover_letter(body: CoverIn):
 @app.post("/api/justify_keywords")
 def justify_keywords(body: JustifyIn):
     return _justify_work(_justify_check(body), body)
+
+
+@app.post("/api/refine_change")
+def refine_change(body: RefineIn):
+    return _refine_work(_refine_check(body), body)
 
 
 @app.post("/api/export")
@@ -778,6 +827,13 @@ def job_justify(body: JustifyIn):
     plan = [("note", f"Read your input ({n})"), ("decide", "Research and place keywords"), ("check", "Honesty checks")]
     return _job_out(jobs.start("justify_keywords", f"Fill {_plural(n, 'keyword gap')}", plan,
                                lambda: _justify_work(s, body)))
+
+
+@app.post("/api/jobs/refine_change")
+def job_refine(body: RefineIn):
+    s = _refine_check(body)
+    plan = [("rewrite", "Rewrite the line"), ("check", "Honesty checks")]
+    return _job_out(jobs.start("refine_change", "Rewrite a line", plan, lambda: _refine_work(s, body)))
 
 
 @app.post("/api/jobs/find_jobs")

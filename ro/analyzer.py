@@ -201,6 +201,41 @@ KEYWORDS_TOOL = {
     },
 }
 
+REFINE_TOOL = {
+    "name": "record_rewrites",
+    "description": "Record three alternative rewrites of the line, each following the candidate's instruction.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "options": {
+                "type": "array",
+                "description": "Exactly 3 rewrites of the line, each a different take on the instruction",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "The COMPLETE new text of the line, without a bullet symbol"},
+                        "note": {"type": "string", "description": "One short line to the candidate: how this option differs"},
+                    },
+                    "required": ["text", "note"],
+                },
+            },
+        },
+        "required": ["options"],
+    },
+}
+
+REFINE_RULES = """Rules — follow all of them:
+1. Follow the candidate's instruction: it says what they don't like about the line. Give 3 options that each
+   fix it a different way (e.g. a different verb, where the keyword sits, a shorter or tighter version).
+2. Keep every keyword listed under "Keep these keywords", written exactly as given (same capitals and
+   punctuation, singular or plural is fine), unless the instruction asks to drop one. ATS matching is literal.
+3. Use only facts from the resume or the candidate's notes. No new numbers, tools, team sizes, scope,
+   seniority or outcomes. Never inflate.
+4. Keep roughly the line's length (≤ ~1.2x) unless the instruction asks for shorter or longer, and match the
+   tense and voice of the surrounding bullets. Start bullets with a strong action verb.
+5. Keep any tab characters (\\t). Write the line only: no bullet symbol, no quotes, no line breaks.
+6. Each option must read differently from the current line and from the other options."""
+
 KEYWORD_RULES = """Rules — follow all of them:
 0. The candidate is not available for questions: never ask them anything. They have already decided they want
    every keyword below on their resume: place ALL of them. Never leave one out and never explain why it
@@ -630,6 +665,54 @@ def decide_keywords(jd: dict, paragraphs: list[dict], edits: dict[str, str], ite
         "\n\nWrite the edits that work these keywords in naturally."
     )
     return _call_tool(SYSTEM, user, KEYWORDS_TOOL, 6000)
+
+
+def refine_line(jd: dict, paragraphs: list[dict], edits: dict[str, str], target_id: str, line: str, original: str,
+                keywords: list[str], instruction: str, notes: list[str] | None = None) -> dict:
+    """Three rewrites of one line of an edit (a bullet, or a new bullet under it) the way the candidate asks."""
+    by_term = {k.get("term", "").lower(): k for k in jd.get("keywords", [])}
+    kws = [by_term.get(t.lower(), {"term": t}) for t in keywords]
+    extras = ("\n\nThe candidate's own notes (true; you may use these facts):\n" + "\n".join(f"- {n}" for n in notes)) if notes else ""
+    user = (
+        f"Job: {jd.get('role', '')} at {jd.get('company', '')}. {jd.get('summary', '')}\n\n"
+        "Resume paragraphs (id, section/kind, JSON-quoted current text):\n" + "\n".join(_para_lines(paragraphs, edits)) + extras +
+        f"\n\nThe line to rewrite is in paragraph {target_id}" + (" (a new bullet added under it)" if not original else "") + ":\n"
+        f"<line>{BULLET_LEAD.sub('', line).strip()}</line>\n"
+        + (f"<original>{BULLET_LEAD.sub('', original).strip()}</original> (the candidate's own wording, before any edit)\n" if original else "")
+        + "Keep these keywords: " + (json.dumps(kws, ensure_ascii=False) if kws else "(none)") +
+        f"\n\n<instruction>\n{instruction.strip()[:1000]}\n</instruction>\n\n" + REFINE_RULES +
+        "\n\nWrite the 3 options."
+    )
+    return _call_tool(SYSTEM, user, REFINE_TOOL, 2000)
+
+
+def validate_rewrites(raw: dict, line: str, paragraphs: list[dict], jd: dict, keywords: list[str],
+                      known_text: str = "") -> dict:
+    """Up to 3 clean options for one line: the line's bullet symbol kept, the JD's spelling, flags for new numbers,
+    a lost keyword or a much longer line; empty, unchanged and duplicate options dropped."""
+    lead = BULLET_LEAD.match(line).group(0)
+    known = {n.strip("., ") for n in _NUM.findall("\n".join(p["text"] for p in paragraphs) + "\n" + line + "\n" + known_text)}
+    cur, seen, out, dropped = BULLET_LEAD.sub("", line).strip(), set(), [], []
+    for o in raw.get("options", []) or []:
+        text = re.sub(r"\s*\n\s*", " ", BULLET_LEAD.sub("", (o.get("text") or "").strip())).strip().strip('"“”')
+        text, _ = fix_spelling(text, jd.get("keywords", []))
+        why = ("is empty" if not text else "doesn't change anything" if text == cur else
+               "repeats another option" if text.lower() in seen else "is over the limit of 3" if len(out) >= 3 else "")
+        if why:
+            dropped.append(f"option {len(out) + len(dropped) + 1}: {why}")
+            continue
+        seen.add(text.lower())
+        warnings = []
+        new_nums = sorted({n.strip("., ") for n in _NUM.findall(text)} - known)
+        if new_nums:
+            warnings.append("Adds a number not in your resume (" + ", ".join(new_nums) + ") — verify it's true.")
+        lost = [t for t in keywords if mentions(line, t) and not mentions(text, t)]
+        if lost:
+            warnings.append(f"Drops {', '.join(lost)} — the keyword this line was edited for.")
+        if len(text) > max(60, 1.4 * len(cur)):
+            warnings.append("Noticeably longer than the current line — check it still fits on the page.")
+        out.append({"text": lead + text, "note": (o.get("note") or "").strip(), "warnings": warnings})
+    return {"options": out, "dropped": dropped}
 
 
 BULLET_LEAD = re.compile(r"^[\s•●▪■◦‣∙·\-–*]*")

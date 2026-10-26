@@ -1,6 +1,7 @@
 import type { Change } from "../../api/types";
 import { get, set, type DiffMode, type Filter } from "../../store/app";
 import { fullText, kwForTerm, matchesFilter, tabLabel, visibleEdits } from "../../store/derive";
+import { cancelJob } from "../../lib/jobs";
 import { hasExact } from "../../lib/keywords";
 import { toast } from "../../store/toasts";
 import { resetJob, setTabTitle } from "../setup/actions";
@@ -18,7 +19,8 @@ export const scrollToChange = (id: string) =>
 
 export function openPop(id: string) {
   if (!byId(id)) return;
-  set({ pop: id, editorOpen: false });
+  cancelJob(get().refineJob);
+  set({ pop: id, editorOpen: false, refine: null, refineOptions: null });
   scrollToChange(id);
 }
 
@@ -48,14 +50,14 @@ export function toggleChange(id: string, on?: boolean) {
   });
 }
 
-export function saveEdit(c: Change, value: string) {
+export function saveEdit(c: Change, value: string, msg = "Edit saved") {
   const v = value.trim();
   set((s) => {
     const edits = { ...s.edits };
     if (v && v !== c.new_text) edits[c.id] = v; else delete edits[c.id];
     return { edits, selected: new Set(s.selected).add(c.id), editorOpen: false };
   });
-  toast("Edit saved", "ok");
+  toast(msg, "ok");
 }
 
 export function resetEdit(c: Change) {
@@ -123,8 +125,9 @@ export function mergeChanges(newChanges: Change[]) {
 
 export function restart() {
   resetJob();
+  cancelJob(get().refineJob);
   set({
-    view: "setup", pop: null, sheet: null, menuOpen: false,
+    view: "setup", pop: null, refine: null, refineOptions: null, sheet: null, menuOpen: false,
     gaps: {}, gapExtra: [], gapsSummary: "", cover: null, coverEdited: false, manager: "", why: "", coverStatus: { msg: "", kind: "info" },
     exported: false, analyzeStatus: { msg: "", kind: "info" },
   });

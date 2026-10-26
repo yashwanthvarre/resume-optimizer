@@ -76,3 +76,15 @@ def keyword_decisions(user_prompt):
 # A job posting that contains every keyword in JD (keywords not in the posting are dropped by analyze_jd)
 JD_TEXT = ("Globex is hiring a Backend Engineer. Required: Python, REST APIs and AWS, building microservices. "
            "Preferred: CI/CD, Docker, PostgreSQL and attention to detail. Nice to have: code review culture and Kubernetes.")
+
+def rewrites(user_prompt):
+    """Canned record_rewrites: a shorter line, a new verb, and one with a number the resume doesn't have."""
+    import re
+    line = re.search(r"<line>(.*?)</line>", user_prompt, re.S).group(1).strip()
+    w = line.split()
+    rest = " ".join(w[1:])
+    return {"options": [
+        {"text": " ".join(w[:max(4, len(w) * 2 // 3)]), "note": "Shorter: ends sooner"},
+        {"text": ("Developed " if w[0] != "Developed" else "Built ") + rest, "note": "A different lead verb"},
+        {"text": "Drove " + rest + " for 40 teams", "note": "Adds scope"},
+        {"text": line, "note": "Unchanged (the server drops this)"}]}

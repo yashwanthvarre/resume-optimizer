@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Analysis, Config, CoverLetter, FindResult, Job, JdMeta, KeywordDecision, Resume } from "../api/types";
+import type { Analysis, Config, CoverLetter, FindResult, Job, JdMeta, KeywordDecision, RefineOption, Resume } from "../api/types";
 import type { Kw } from "../lib/keywords";
 
 export type Kind = "info" | "ok" | "err";
@@ -94,6 +94,13 @@ export interface AppState {
   exporting: "" | "resume" | "cover" | "both";
   dlFormat: DlFormat | null; // picked next to Download; null = the Settings choice
 
+  // ask Claude to rewrite one line of an edit: line = its index in splitLines, anchor = the highlight it opened from
+  refine: { id: string; line: number; anchor: string } | null;
+  refineAsk: string;
+  refineJob: Job | null;
+  refineStatus: Status;
+  refineOptions: RefineOption[] | null;
+
   // keyword sheets
   sheet: null | "keywords" | "gaps";
   gapFocus: { terms: string[]; at: number };
@@ -137,6 +144,7 @@ export const initialState: AppState = {
   analysis: null, kws: [], kwAll: [], selected: new Set(), edits: {}, filter: "all", kwFilter: null, pop: null, editorOpen: false,
   exported: false, showMarks: true, diffMode: storedDiffMode(), noticeOpen: true, menuOpen: false, addedNow: { ids: [], at: 0 },
   exportStatus: st(), exporting: "", dlFormat: null,
+  refine: null, refineAsk: "", refineJob: null, refineStatus: st(), refineOptions: null,
   sheet: null, gapFocus: { terms: [], at: 0 }, gaps: {}, gapExtra: [], gapsSummary: "", gapsJob: null, gapsStatus: st(),
   cover: null, letter: emptyLetter, coverEdited: false, tone: "warm", manager: "", why: "", coverJob: null, coverStatus: st(),
   coverFormOpen: true, boldLetterKw: false, cvExportStatus: st(),
