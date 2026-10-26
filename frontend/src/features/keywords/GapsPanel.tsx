@@ -1,21 +1,49 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAutosize } from "../../hooks/useAutosize";
-import { useApp, type AppState } from "../../store/app";
+import { set, useApp, type AppState } from "../../store/app";
 import { gapOf, gapReady, gapReason, gapStatus, gapTerms, kwForTerm, roleOptions } from "../../store/derive";
 import { hasLoose } from "../../lib/keywords";
+import { ClaudeIcon } from "../../ui/ClaudeIcon";
 import { Collapse } from "../../ui/Collapse";
 import { Seg } from "../../ui/Seg";
 import { Sheet } from "../../ui/Sheet";
 import { StatusLine } from "../../ui/StatusLine";
-import { acceptGapEdit, closeSheet, skipAll, stopGaps, submitGaps, updateGap } from "./actions";
+import { acceptGapEdit, closeSheet, skipAll, stopAsk, stopGaps, submitAsk, submitGaps, updateGap } from "./actions";
+
+/** Any change in the user's own words: Claude edits the lines it's about, and they land on the page. */
+function AskBox() {
+  const { askText: ask, askJob: job, askStatus, askReply: reply } = useApp();
+  const ref = useAutosize(ask), busy = !!job;
+  return (
+    <div id="askBox" className="mx-5 mt-3 grid gap-2 rounded-card border border-line bg-paper p-3">
+      <label htmlFor="askText" className="flex items-center gap-1.5 text-[13px] font-semibold">
+        <span className="text-claude"><ClaudeIcon size={14} /></span>Ask Claude to change something
+      </label>
+      <textarea ref={ref} id="askText" className="field resize-none overflow-hidden" rows={2} value={ask} disabled={busy}
+        placeholder="e.g. mention I led the Postgres migration at Acme, or make the summary shorter"
+        onChange={(e) => set({ askText: e.target.value })}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submitAsk(); } }} />
+      <div className="flex flex-wrap items-center gap-1.5">
+        {busy ? <button type="button" className="btn secondary sm" id="askStop" onClick={stopAsk}>Stop</button>
+          : <button type="button" className="btn sm" id="askGo" disabled={!ask.trim()} onClick={() => void submitAsk()}>Make the change</button>}
+        <StatusLine s={askStatus} className="!m-0" />
+      </div>
+      <AnimatePresence>
+        {reply && !busy && (
+          <motion.p id="askReply" className="small muted" aria-live="polite" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{reply}</motion.p>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 function NoteBox({ term, i, note, role, roles }: { term: string; i: number; note: string; role: string; roles: string[] }) {
   const ref = useAutosize(note);
   return (
     <div className="grid gap-1.5">
-      <label className="label !mt-1 !mb-0" htmlFor={`gapNote${i}`}>Your idea, in a few words</label>
-      <textarea ref={ref} id={`gapNote${i}`} className="field min-h-[60px] resize-none overflow-hidden" rows={2} data-note
+      <label className="label !mt-1 !mb-0" htmlFor={`gapNote${i}`}>Anything Claude should know? (optional)</label>
+      <textarea ref={ref} id={`gapNote${i}`} className="field resize-none overflow-hidden" rows={1} data-note
         placeholder="e.g. used it for the billing dashboard at Acme" value={note} onChange={(e) => updateGap(term, { note: e.target.value })} />
       <select className="field" aria-label="Which role was this in? (optional)" value={role} onChange={(e) => updateGap(term, { role: e.target.value })}>
         <option value="">Claude picks the role</option>
@@ -51,12 +79,9 @@ function GapRow({ s, term, i, roles, flash }: { s: AppState; term: string; i: nu
       ) : (
         <>
           <Seg radio className="justify-self-start" label={`How should Claude handle ${term}?`} value={g.choice}
-            onChange={(c) => {
-              updateGap(term, { choice: c });
-              if (c === "note") setTimeout(() => document.getElementById(`gapNote${i}`)?.focus(), 80);
-            }}
-            options={[{ value: "add", label: "Add it" }, { value: "note", label: "Describe it" }, { value: "skip", label: "Skip" }]} />
-          <Collapse open={g.choice === "note"}><NoteBox term={term} i={i} note={g.note} role={g.role} roles={roles} /></Collapse>
+            onChange={(c) => updateGap(term, { choice: c })}
+            options={[{ value: "add", label: "Add it" }, { value: "skip", label: "Skip" }]} />
+          <Collapse open={!skipped}><NoteBox term={term} i={i} note={g.note} role={g.role} roles={roles} /></Collapse>
         </>
       )}
     </motion.div>
@@ -91,7 +116,7 @@ export function GapsPanel() {
   const ready = terms.filter((t) => gapReady(s, t)), n = ready.length;
   const openTerms = terms.filter((t) => gapOf(s, t).choice !== "skip"), all = n === openTerms.length;
   const allSkipped = terms.length > 0 && !openTerms.length;
-  const submitLabel = running ? `Adding ${n} keyword${n === 1 ? "" : "s"}…` : !n ? (openTerms.length ? "Write a quick note to continue" : "Nothing to add")
+  const submitLabel = running ? `Adding ${n} keyword${n === 1 ? "" : "s"}…` : !n ? "Nothing to add"
     : n === 1 ? "Add 1 keyword" : `Add ${all ? "all " : ""}${n} ${all ? "missing " : ""}keywords`;
 
   // suggestions that don't name a keyword are advice; the rest already appear as rows
@@ -99,15 +124,16 @@ export function GapsPanel() {
 
   return (
     <Sheet id="gapsDlg" labelId="gapsTitle" open={open} wide onClose={closeSheet} title="Add missing keywords"
-      sub={<><b>Add it</b>: Claude looks up what each keyword covers, finds the closest work in your resume and works it into that line. No questions. <b>Describe it</b>: give Claude a quick idea instead. <b>Skip</b>: leave out keywords that don't fit you.</>}
-      top={
+      sub={<><b>Add it</b>: Claude finds the closest work in your resume and works the keyword into that line. Write a note under a keyword to tell Claude where or how you used it. Leave it empty and Claude decides. <b>Skip</b>: leave out keywords that don't fit you.</>}
+      top={<>
+        <AskBox />
         <AnimatePresence>
           {s.gapsSummary && (
             <motion.div id="gapsSummary" aria-live="polite" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
               className="mx-5 mt-3 rounded-ctl bg-sky-bg px-3 py-2 text-[13px] font-semibold text-sky">{s.gapsSummary}</motion.div>
           )}
         </AnimatePresence>
-      }
+      </>}
       foot={
         <>
           <StatusLine id="gapsStatus" s={s.gapsStatus} />

@@ -76,3 +76,35 @@ def keyword_decisions(user_prompt):
 # A job posting that contains every keyword in JD (keywords not in the posting are dropped by analyze_jd)
 JD_TEXT = ("Globex is hiring a Backend Engineer. Required: Python, REST APIs and AWS, building microservices. "
            "Preferred: CI/CD, Docker, PostgreSQL and attention to detail. Nice to have: code review culture and Kubernetes.")
+
+def rewrites(user_prompt):
+    """Canned record_rewrites: a shorter line, a new verb, and one with a number the resume doesn't have; asked for
+    1 rewrite (the direct edit), just the new verb, which keeps the line's keywords and adds nothing to flag —
+    unless the instruction asks for "40 teams", a number the resume doesn't have."""
+    import re
+    line = re.search(r"<line>(.*?)</line>", user_prompt, re.S).group(1).strip()
+    w = line.split()
+    rest = " ".join(w[1:])
+    if re.search(r"\badd (this|it|the keyword)\b.*\b(in|to|under)\b", re.search(r"<instruction>(.*?)</instruction>", user_prompt, re.S).group(1), re.I):
+        return {"options": [], "elsewhere": True}  # the request reaches another role: the instruct step makes it
+    if "Write the 1 rewrite." in user_prompt:
+        scope = " for 40 teams" if "40 teams" in re.search(r"<instruction>(.*?)</instruction>", user_prompt, re.S).group(1) else ""
+        return {"options": [{"text": ("Developed " if w[0] != "Developed" else "Built ") + rest + scope, "note": "Done as asked"}]}
+    return {"options": [
+        {"text": " ".join(w[:max(4, len(w) * 2 // 3)]), "note": "Shorter: ends sooner"},
+        {"text": ("Developed " if w[0] != "Developed" else "Built ") + rest, "note": "A different lead verb"},
+        {"text": "Drove " + rest + " for 40 teams", "note": "Adds scope"},
+        {"text": line, "note": "Unchanged (the server drops this)"}]}
+
+
+def instruct_edits(user_prompt):
+    """Canned record_instruction_edits: rewrites the code-review bullet (p8) from the request, adds a new bullet after
+    it, and returns an edit to a missing paragraph (dropped by the server)."""
+    import re, json
+    cur = {k: json.loads(v) for k, v in re.findall(r'^\[(p\d+)\] \([^)]*\) (".*")$', user_prompt, re.M)}
+    lead = re.match(r"^[\s•●▪■◦‣∙·\-–*]*", cur["p8"]).group(0)
+    return {"reply": "Reworded your code-review bullet and added a mentoring bullet under it.",
+            "changes": [{"target_id": "p8", "new_text": lead + "Led code review for 3 teammates, catching bugs before release.",
+                         "type": "reword", "reason": "You asked to show leadership."},
+                        {"target_id": "p999", "new_text": "Nope", "type": "reword", "reason": "x"}],
+            "new_bullets": [{"after_id": "p8", "text": "Mentored two new hires on the orders service", "jd_keywords": []}]}

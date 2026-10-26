@@ -11,6 +11,7 @@ import { openGaps, openKeywords } from "../keywords/actions";
 import { closePop, selectAll, setDiffMode, setFilter, setKwFilter, stepPop, toggleChange } from "./actions";
 import { FileLine } from "./FileLine";
 import { FormatToggle } from "./FormatToggle";
+import { closeRefine } from "./refine";
 import { ResumePage } from "./ResumePage";
 
 const noticeText = (n: string | { text: string }) => (typeof n === "string" ? n : n.text);
@@ -173,7 +174,7 @@ function useReviewKeys(active: boolean) {
         case "a": selectAll(true); break;
         case "n": selectAll(false); break;
         case "h": set({ showMarks: !s.showMarks }); break;
-        case "Escape": if (s.menuOpen) set({ menuOpen: false }); else if (s.pop) closePop(); else if (s.kwFilter) setKwFilter(null); else return; break;
+        case "Escape": if (s.refine) closeRefine(); else if (s.menuOpen) set({ menuOpen: false }); else if (s.pop) closePop(); else if (s.kwFilter) setKwFilter(null); else return; break;
         default: return;
       }
       e.preventDefault();

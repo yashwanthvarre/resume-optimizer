@@ -13,6 +13,13 @@ export const tabLabel = (s: Pick<AppState, "analysis">) =>
 
 export const changeText = (s: Pick<AppState, "edits">, c: Change) => s.edits[c.id] ?? c.new_text;
 
+/** A bullet's edited text can end with new bullets, one per extra line; line breaks it already had stay in it. */
+export function splitLines(kind: string, orig: string, raw: string): string[] {
+  if (kind !== "bullet") return [raw];
+  const lines = raw.split("\n"), keep = orig.split("\n").length;
+  return [lines.slice(0, keep).join("\n"), ...lines.slice(keep).filter((t) => t.trim())];
+}
+
 export function currentText(s: S, id: string): string | null {
   const c = s.analysis?.changes.find((x) => x.target_id === id && s.selected.has(x.id));
   return c ? changeText(s, c) : null;
@@ -88,7 +95,7 @@ export function gapTerms(s: AppState) {
 
 export function gapReady(s: AppState, term: string) {
   const g = gapOf(s, term);
-  return gapStatus(s, term) !== "added" && g.choice !== "skip" && !(g.choice === "note" && !g.note.trim());
+  return gapStatus(s, term) !== "added" && g.choice !== "skip";
 }
 
 export function gapReason(s: AppState, k: Kw): { text: string; change?: string } {

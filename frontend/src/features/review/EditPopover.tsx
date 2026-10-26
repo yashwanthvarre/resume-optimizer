@@ -6,11 +6,13 @@ import { SHEET_QUERY, useMedia } from "../../hooks/useMedia";
 import { diffOps, diffView, heavy } from "../../lib/diff";
 import { set, useApp, type DiffMode } from "../../store/app";
 import { changeText, visibleEdits } from "../../store/derive";
+import { ClaudeIcon } from "../../ui/ClaudeIcon";
 import { byId, closePop, resetEdit, saveEdit, stepPop, toggleChange } from "./actions";
+import { openRefine } from "./refine";
 
 const TYPE_LABEL: Record<string, string> = { reword: "Reworded", keyword: "Keyword", quantify: "Impact", reorder: "Reordered", tighten: "Tightened", summary: "Summary", spelling: "Match JD spelling", new_bullet: "New bullet" };
 
-function Diff({ a, b, mode }: { a: string; b: string; mode: DiffMode }) {
+export function Diff({ a, b, mode }: { a: string; b: string; mode: DiffMode }) {
   const ops = diffOps(a, b);
   const stacked = mode === "stacked" || (mode === "auto" && heavy(ops, a, b));
   if (!stacked)
@@ -48,13 +50,13 @@ function Editor({ c }: { c: Change }) {
   );
 }
 
-/** Where the popover sits: just under its paragraph, inside the page's width (document coordinates). */
-function usePosition(id: string | null, sheet: boolean) {
+/** Where a popover sits: just under the first of `sels` on the page, inside the page's width (document coordinates). */
+export function usePosition(sels: string[] | null, sheet: boolean) {
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
   useLayoutEffect(() => {
-    if (!id || sheet) return;
+    if (!sels || sheet) return;
     const place = () => {
-      const el = document.querySelector(`[data-change="${CSS.escape(id)}"]`), page = document.getElementById("preview");
+      const el = sels.map((x) => document.querySelector(x)).find(Boolean), page = document.getElementById("preview");
       if (!el || !page) return;
       const r = el.getBoundingClientRect(), pr = page.getBoundingClientRect(), w = Math.min(480, pr.width - 16);
       const next = { width: w, left: Math.max(8, Math.min(r.left, pr.right - w - 8)) + scrollX, top: r.bottom + scrollY + 8 };
@@ -71,7 +73,7 @@ export function EditPopover() {
   const s = useApp();
   const sheet = useMedia(SHEET_QUERY);
   const c = s.view === "review" ? byId(s.pop) : undefined;
-  const pos = usePosition(c?.id ?? null, sheet);
+  const pos = usePosition(c ? [`[data-change="${CSS.escape(c.id)}"]`] : null, sheet);
 
   // a click anywhere else closes it
   useEffect(() => {
@@ -111,6 +113,7 @@ function PopBody({ c }: { c: Change }) {
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="mr-auto text-xs font-semibold tracking-[.04em] text-ink-3 uppercase">{sec}</span>
         {c.source === "add" ? <span className="tag lilac" title={`Claude added ${c.from_input} from work your resume already shows. Skip it if it isn't accurate`}>Added by Claude</span>
+          : c.source === "ask" ? <span className="tag sky" title={`You asked Claude: ${c.from_input}`}>Your request</span>
           : c.from_input ? <span className="tag sky" title={`Added from what you told Claude about ${c.from_input}`}>From your input</span> : null}
         {edited && <span className="tag">Edited by you</span>}
         <span className="ml-1.5 inline-flex items-center gap-0.5">
@@ -137,6 +140,7 @@ function PopBody({ c }: { c: Change }) {
           {on ? "Skip" : "Skipped"}
         </motion.button>
         <button type="button" className="btn ghost pop-edit" onClick={() => set({ editorOpen: true })}>Edit</button>
+        {on && <button type="button" className="btn ghost pop-ask" onClick={() => openRefine(c.id, 0, `mk-${c.target_id}-0`)}><span className="text-claude"><ClaudeIcon /></span>Ask Claude</button>}
         {edited && <button type="button" className="btn ghost" onClick={() => resetEdit(c)}>Reset</button>}
       </div>
     </>

@@ -40,6 +40,18 @@ export function diffView(ops: Op[], drop: "+" | "-"): Op[] {
   return out;
 }
 
+/** [start, end) of each run b adds to a, trimmed of spaces: the words to highlight on the page. */
+export function insertedSpans(a: string, b: string): [number, number][] {
+  const out: [number, number][] = [];
+  let at = 0;
+  for (const o of diffView(diffOps(a, b), "-")) {
+    const lead = o.s.length - o.s.trimStart().length, len = o.s.trim().length;
+    if (o.t === "+" && len) out.push([at + lead, at + lead + len]);
+    at += o.s.length;
+  }
+  return out;
+}
+
 const words = (s: string) => (s.match(/\S+/g) || []).length;
 /** Heavy rewrites turn inline marks into word soup; those read better as Before / After. */
 export const heavy = (ops: Op[], a: string, b: string) =>

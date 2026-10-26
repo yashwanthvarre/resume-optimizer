@@ -104,6 +104,26 @@ export interface JustifyResult {
   changes: Change[];
 }
 
+/** One of Claude's rewrites of a line, from /api/jobs/refine_change. */
+export interface RefineOption {
+  text: string;
+  note: string;
+  warnings: string[];
+}
+
+export interface RefineResult {
+  options: RefineOption[];
+  dropped: string[];
+  instruct?: InstructResult; // the request reached beyond the line (e.g. "add this keyword to my X role"): edits anywhere
+}
+
+/** Edits that carry out a free-form request, from /api/jobs/instruct. */
+export interface InstructResult {
+  reply: string;
+  changes: Change[];
+  dropped: string[];
+}
+
 export interface CoverLetter {
   greeting: string;
   paragraphs: string[];

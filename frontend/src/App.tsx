@@ -5,6 +5,7 @@ import { CoverView } from "./features/coverLetter/CoverView";
 import { GapsPanel } from "./features/keywords/GapsPanel";
 import { KeywordsPanel } from "./features/keywords/KeywordsPanel";
 import { EditPopover } from "./features/review/EditPopover";
+import { RefinePopover } from "./features/review/RefinePopover";
 import { ReviewView } from "./features/review/ReviewView";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { init } from "./features/setup/actions";
@@ -36,6 +37,7 @@ export function App() {
       <ReviewView />
       <CoverView />
       <EditPopover />
+      <RefinePopover />
       <ActivityPanel />
       <KeywordsPanel />
       <GapsPanel />
